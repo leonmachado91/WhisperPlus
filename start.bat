@@ -7,8 +7,8 @@ echo.
 
 call .venv\Scripts\activate
 
-set HF_HOME=e:\Dev\Whisper Live Kit\.hf_cache
-set HUGGINGFACE_HUB_CACHE=e:\Dev\Whisper Live Kit\.hf_cache
+set HF_HOME=%~dp0.hf_cache
+set HUGGINGFACE_HUB_CACHE=%~dp0.hf_cache
 
 :: Load variables from .env file if it exists
 if exist .env (

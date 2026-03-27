@@ -136,5 +136,37 @@ After applying the fix, restart `wlk`. Incoming streams will now compile kernels
 
 ---
 
+## CUDA e Problemas no Windows (WhisperPlus)
+
+### Erro: `Could not locate cublas64_12.dll` ou `cublas64_*.dll` não encontrado
+> Um problema comum de conflito durante a instalação do PyTorch no Windows.
+
+Se você receber o erro acusando a falta de DLLs de `cublas` ou pacotes CUDA ao inicializar a transcrição usando GPU:
+
+Isso acontece quando os módulos que dependem do CUDA (como o PyTorch e o CTranslate2) puxam dependências que entram em desajuste.
+**Como Resolver:**
+Assegure-se de que os pacotes do PyTorch (torch, torchaudio, torchvision) estão perfeitamente sincronizados com os binários de GPU e force a instalação dos wheels da NVIDIA.
+
+1. Ative seu ambiente venv.
+2. Desinstale as versões em conflito: `pip uninstall torch torchaudio torchvision`
+3. Force a reinstalação apontando para a distribuição correta da NVIDIA local (Exemplo CUDA 12.4):
+   ```bash
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+   ```
+4. Em seguida, garanta que o `ctranslate2` não puxou uma versão CPU:
+   `pip install ctranslate2`
+
+### Erro: `ModuleNotFoundError: No module named 'diart'`
+> Acontece ao invés da tela subir quando `--diarization` está ativado.
+
+Para que a transcrição consiga registrar quem está falando (Speaker 0, Speaker 1), o modelo por default requer o módulo **diart** (se você escolheu ele no script `start.bat`: `--diarization-backend diart`).
+**Como Resolver:**
+1. Verifique se as dependências do `diart` foram instaladas. Execute no venv:
+   `uv sync --extra diarization-diart` ou `pip install diart`.
+2. Como os pacotes do diart podem quebrar por exigirem versões restritas de `rx` e `pyannote.audio`, instale as versões alíneadas que a biblioteca utiliza sem regredir o torch se possível.
+3. Não esqueça do `huggingface-cli login`, pois o diart precisa baixar os checkpoints do Hub Pyannote sob acesso supervisionado.
+
+---
+
 Need help with another recurring issue? Open a GitHub discussion or PR and reference this document so we can keep it current.
 

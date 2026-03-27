@@ -1,392 +1,88 @@
-<h1 align="center">WLK</h1>
-<p align="center"><b>WhisperLiveKit: Ultra-low-latency, self-hosted speech-to-text with speaker identification</b></p>
+# WhisperPlus
 
+O **WhisperPlus** é uma versão customizada e focada em produtividade do [WhisperLiveKit](https://github.com/QuentinFuxa/WhisperLiveKit). Ele foi adaptado para rodar localmente no Windows de forma simplificada, fornecendo transcrição ultra-rápida (com suporte a GPU) em tempo real, especificamente otimizada para a língua portuguesa.
 
-<p align="center">
-<img src="https://raw.githubusercontent.com/QuentinFuxa/WhisperLiveKit/refs/heads/main/demo.png" alt="WhisperLiveKit Demo" width="730">
-</p>
+## Principais Recursos e Modificações
 
+*   **Exportação em Tempo Real `.txt`**: O servidor grava continuamente o estado completo da transcrição em `transcription_live.txt` (não apenas logs no console).
+*   **Ajustes de Interação Frontend**: Suporte ao envio de `initial_prompt` (para guiar o modelo) e `word_replacements` (correção em tempo real de termos específicos).
+*   **Modo Folder-Watch (Offline)**: Processamento em lote colocando arquivos de áudio/vídeo na pasta `input/`, com as transcrições salvas automaticamente na pasta `output/`.
+*   **Launcher Local**: Ferramenta `WhisperPlus.exe` que inicializa o servidor FastAPI e abre automaticamente a interface no navegador.
+*   **Foco Local em Português**: Configurado nativamente para focar na detecção e compreensão do idioma português (`pt`).
 
-<p align="center">
-<a href="https://pypi.org/project/whisperlivekit/"><img alt="PyPI Version" src="https://img.shields.io/pypi/v/whisperlivekit?color=g"></a>
-<a href="https://pepy.tech/project/whisperlivekit"><img alt="PyPI Downloads" src="https://static.pepy.tech/personalized-badge/whisperlivekit?period=total&units=international_system&left_color=grey&right_color=brightgreen&left_text=installations"></a>
-<a href="https://pypi.org/project/whisperlivekit/"><img alt="Python Versions" src="https://img.shields.io/badge/python-3.11--3.13-dark_green"></a>
-<a href="https://huggingface.co/qfuxa/whisper-base-french-lora">
-  <img alt="Hugging Face Weights" src="https://img.shields.io/badge/🤗-Hugging%20Face%20Weights-yellow" />
-</a>
-<a href="https://github.com/QuentinFuxa/WhisperLiveKit/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache 2.0-dark_green"></a>
-</p>
+---
 
+## 🚀 Como Iniciar
 
-### Powered by Leading Research:
+### Pré-requisitos
+1.  **Python 3.11** ou superior
+2.  **FFmpeg**: Necessário para decodificar streams de áudio. Garanta que o comando `ffmpeg` esteja no seu `PATH` do Windows.
+3.  *(Opcional, mas Recomendado)* **NVIDIA GPU + CUDA**: Placa de vídeo Nvidia moderna para transcrição em tempo real sem atrasos.
 
-- Simul-[Whisper](https://arxiv.org/pdf/2406.10052)/[Streaming](https://arxiv.org/abs/2506.17077) (SOTA 2025) - Ultra-low latency transcription using [AlignAtt policy](https://arxiv.org/pdf/2305.11408). 
-- [NLLW](https://github.com/QuentinFuxa/NoLanguageLeftWaiting) (2025), based on [distilled](https://huggingface.co/entai2965/nllb-200-distilled-600M-ctranslate2) [NLLB](https://arxiv.org/abs/2207.04672) (2022, 2024) - Simulatenous translation from & to 200 languages.
-- [WhisperStreaming](https://github.com/ufal/whisper_streaming) (SOTA 2023) - Low latency transcription using [LocalAgreement policy](https://www.isca-archive.org/interspeech_2020/liu20s_interspeech.pdf)
-- [Streaming Sortformer](https://arxiv.org/abs/2507.18446) (SOTA 2025) - Advanced real-time speaker diarization
-- [Diart](https://github.com/juanmc2005/diart) (SOTA 2021) - Real-time speaker diarization
-- [Voxtral Mini](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602) (2025) - 4B-parameter multilingual speech model by Mistral AI
-- [Silero VAD](https://github.com/snakers4/silero-vad) (2024) - Enterprise-grade Voice Activity Detection
+### Instalação
 
-
-> **Why not just run a simple Whisper model on every audio batch?** Whisper is designed for complete utterances, not real-time chunks. Processing small segments loses context, cuts off words mid-syllable, and produces poor transcription. WhisperLiveKit uses state-of-the-art simultaneous speech research for intelligent buffering and incremental processing.
-
-
-### Architecture
-
-<img alt="Architecture" src="https://raw.githubusercontent.com/QuentinFuxa/WhisperLiveKit/refs/heads/main/architecture.png" />
-
-*The backend supports multiple concurrent users. Voice Activity Detection reduces overhead when no voice is detected.*
-
-### Installation & Quick Start
-
-```bash
-pip install whisperlivekit
-```
-
-#### Quick Start
-
-```bash
-
-# Start the server — open http://localhost:8000 and start talking
-wlk --model base --language en
-
-
-# Auto-pull model and start server
-wlk run whisper:tiny
-
-# Transcribe a file (no server needed)
-wlk transcribe meeting.wav
-
-# Generate subtitles
-wlk transcribe --format srt podcast.mp3 -o podcast.srt
-
-# Manage models
-wlk models                             # See what's installed
-wlk pull large-v3                      # Download a model
-wlk rm large-v3                        # Delete a model
-
-# Benchmark speed and accuracy
-wlk bench
-```
-
-#### API Compatibility
-
-WhisperLiveKit exposes multiple APIs so you can use it as a drop-in replacement:
-
-```bash
-# OpenAI-compatible REST API
-curl http://localhost:8000/v1/audio/transcriptions -F file=@audio.wav
-
-# Works with the OpenAI Python SDK
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="unused")
-
-# Deepgram-compatible WebSocket (use any Deepgram SDK)
-# Just point your Deepgram client at localhost:8000
-
-# Native WebSocket for real-time streaming
-ws://localhost:8000/asr
-```
-
-See [docs/API.md](docs/API.md) for the complete API reference.
-
-> - See [here](https://github.com/QuentinFuxa/WhisperLiveKit/blob/main/whisperlivekit/simul_whisper/whisper/tokenizer.py) for the list of all available languages.
-> - Check the [troubleshooting guide](docs/troubleshooting.md) for step-by-step fixes collected from recent GPU setup/env issues.
-> - For HTTPS requirements, see the **Parameters** section for SSL configuration options.
-
-
-
-
-#### Optional Dependencies
-
-| Feature | `uv sync` | `pip install -e` |
-|-----------|-------------|-------------|
-| **Apple Silicon MLX Whisper backend** | `uv sync --extra mlx-whisper` | `pip install -e ".[mlx-whisper]"` |
-| **Voxtral (MLX backend, Apple Silicon)** | `uv sync --extra voxtral-mlx` | `pip install -e ".[voxtral-mlx]"` |
-| **CPU PyTorch stack** | `uv sync --extra cpu` | `pip install -e ".[cpu]"` |
-| **CUDA 12.9 PyTorch stack** | `uv sync --extra cu129` | `pip install -e ".[cu129]"` |
-| **Translation** | `uv sync --extra translation` | `pip install -e ".[translation]"` |
-| **Sentence tokenizer** | `uv sync --extra sentence_tokenizer` | `pip install -e ".[sentence_tokenizer]"` |
-| **Voxtral (HF backend)** | `uv sync --extra voxtral-hf` | `pip install -e ".[voxtral-hf]"` |
-| **Speaker diarization (Sortformer / NeMo)** | `uv sync --extra diarization-sortformer` | `pip install -e ".[diarization-sortformer]"` |
-| *[Not recommended]* Speaker diarization with Diart | `uv sync --extra diarization-diart` | `pip install -e ".[diarization-diart]"` |
-
-Supported GPU profiles:
-
-```bash
-# Profile A: Sortformer diarization
-uv sync --extra cu129 --extra diarization-sortformer
-
-# Profile B: Voxtral HF + translation
-uv sync --extra cu129 --extra voxtral-hf --extra translation
-```
-
-`voxtral-hf` and `diarization-sortformer` are intentionally incompatible extras and must be installed in separate environments.
-
-See **Parameters & Configuration** below on how to use them.
-
-<p align="center">
-<img src="benchmark_scatter_en_aware.png" alt="Speed vs Accuracy — English" width="700">
-</p>
-<p align="center">
-<img src="benchmark_scatter_fr_aware.png" alt="Speed vs Accuracy — French" width="700">
-</p>
-
-Benchmarks use 6 minutes of public [LibriVox](https://librivox.org/) audiobook recordings per language (30s + 60s + 120s + 180s), with ground truth from [Project Gutenberg](https://www.gutenberg.org/). Fully reproducible with `python scripts/run_scatter_benchmark.py`.
-We are actively looking for benchmark results on other hardware (NVIDIA GPUs, different Apple Silicon chips, cloud instances). If you run the benchmarks on your machine, please share your results via an issue or PR!
-
-
-#### Use it to capture audio from web pages.
-
-Go to `chrome-extension` for instructions.
-
-<p align="center">
-<img src="https://raw.githubusercontent.com/QuentinFuxa/WhisperLiveKit/refs/heads/main/chrome-extension/demo-extension.png" alt="WhisperLiveKit Demo" width="600">
-</p>
-
-
-### Voxtral Backend
-
-WhisperLiveKit supports [Voxtral Mini](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602),
-a 4B-parameter speech model from Mistral AI that natively handles 100+ languages with automatic
-language detection. Whisper also supports auto-detection (`--language auto`), but Voxtral's per-chunk
-detection is more reliable and does not bias towards English.
-
-```bash
-# Apple Silicon (native MLX, recommended)
-pip install -e ".[voxtral-mlx]"
-wlk --backend voxtral-mlx
-
-# Linux/GPU (HuggingFace transformers)
-pip install transformers torch
-wlk --backend voxtral
-```
-
-Voxtral uses its own streaming policy and does not use LocalAgreement or SimulStreaming.
-See [BENCHMARK.md](BENCHMARK.md) for performance numbers.
-
-### Usage Examples
-
-**Command-line Interface**: Start the transcription server with various options:
-
-```bash
-# Large model and translate from french to danish
-wlk --model large-v3 --language fr --target-language da
-
-# Diarization and server listening on */80
-wlk --host 0.0.0.0 --port 80 --model medium --diarization --language fr
-
-# Voxtral multilingual (auto-detects language)
-wlk --backend voxtral-mlx
-```
-
-
-**Python API Integration**: Check [basic_server](https://github.com/QuentinFuxa/WhisperLiveKit/blob/main/whisperlivekit/basic_server.py) for a more complete example of how to use the functions and classes.
-
-```python
-import asyncio
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-
-from whisperlivekit import AudioProcessor, TranscriptionEngine, parse_args
-
-transcription_engine = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global transcription_engine
-    transcription_engine = TranscriptionEngine(model_size="medium", diarization=True, lan="en")
-    yield
-
-app = FastAPI(lifespan=lifespan)
-
-async def handle_websocket_results(websocket: WebSocket, results_generator):
-    async for response in results_generator:
-        await websocket.send_json(response)
-    await websocket.send_json({"type": "ready_to_stop"})
-
-@app.websocket("/asr")
-async def websocket_endpoint(websocket: WebSocket):
-    global transcription_engine
-
-    # Create a new AudioProcessor for each connection, passing the shared engine
-    audio_processor = AudioProcessor(transcription_engine=transcription_engine)    
-    results_generator = await audio_processor.create_tasks()
-    results_task = asyncio.create_task(handle_websocket_results(websocket, results_generator))
-    await websocket.accept()
-    while True:
-        message = await websocket.receive_bytes()
-        await audio_processor.process_audio(message)        
-```
-
-**Frontend Implementation**: The package includes an HTML/JavaScript implementation [here](https://github.com/QuentinFuxa/WhisperLiveKit/blob/main/whisperlivekit/web/live_transcription.html). You can also import it using `from whisperlivekit import get_inline_ui_html` & `page = get_inline_ui_html()`
-
-
-## Parameters & Configuration
-
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `--model` | Whisper model size. List and recommandations [here](https://github.com/QuentinFuxa/WhisperLiveKit/blob/main/docs/default_and_custom_models.md) | `small` |
-| `--model-path` | Local .pt file/directory **or** Hugging Face repo ID containing the Whisper model. Overrides `--model`. Recommandations [here](https://github.com/QuentinFuxa/WhisperLiveKit/blob/main/docs/default_and_custom_models.md) | `None` |
-| `--language` | List [here](docs/supported_languages.md). If you use `auto`, the model attempts to detect the language automatically, but it tends to bias towards English. | `auto` |
-| `--target-language` | If sets, translates using [NLLW](https://github.com/QuentinFuxa/NoLanguageLeftWaiting). [200 languages available](docs/supported_languages.md). If you want to translate to english, you can also use `--direct-english-translation`. The STT model will try to directly output the translation. | `None` |
-| `--diarization` | Enable speaker identification | `False` |
-| `--backend-policy` | Streaming strategy: `1`/`simulstreaming` uses AlignAtt SimulStreaming, `2`/`localagreement` uses the LocalAgreement policy | `simulstreaming` |
-| `--backend` | ASR backend selector. `auto` picks MLX on macOS (if installed), otherwise Faster-Whisper, otherwise vanilla Whisper. Options: `mlx-whisper`, `faster-whisper`, `whisper`, `openai-api` (LocalAgreement only), `voxtral-mlx` (Apple Silicon), `voxtral` (HuggingFace) | `auto` |
-| `--no-vac` | Disable Voice Activity Controller. NOT ADVISED | `False` |
-| `--no-vad` | Disable Voice Activity Detection. NOT ADVISED | `False` |
-| `--warmup-file` | Audio file path for model warmup | `jfk.wav` |
-| `--host` | Server host address | `localhost` |
-| `--port` | Server port | `8000` |
-| `--ssl-certfile` | Path to the SSL certificate file (for HTTPS support) | `None` |
-| `--ssl-keyfile` | Path to the SSL private key file (for HTTPS support) | `None` |
-| `--forwarded-allow-ips` | Ip or Ips allowed to reverse proxy the whisperlivekit-server. Supported types are  IP Addresses (e.g. 127.0.0.1), IP Networks (e.g. 10.100.0.0/16), or Literals (e.g. /path/to/socket.sock) | `None` |
-| `--pcm-input` | raw PCM (s16le) data is expected as input and FFmpeg will be bypassed. Frontend will use AudioWorklet instead of MediaRecorder | `False` |
-| `--lora-path` | Path or Hugging Face repo ID for LoRA adapter weights (e.g., `qfuxa/whisper-base-french-lora`). Only works with native Whisper backend (`--backend whisper`) | `None` |
-
-| Translation options | Description | Default |
-|-----------|-------------|---------|
-| `--nllb-backend` | `transformers` or `ctranslate2` | `transformers` |
-| `--nllb-size` | `600M` or `1.3B` | `600M` |
-
-| Diarization options | Description | Default |
-|-----------|-------------|---------|
-| `--diarization-backend` |  `diart` or `sortformer` | `sortformer` |
-| `--disable-punctuation-split` | [NOT FUNCTIONAL IN 0.2.15 / 0.2.16] Disable punctuation based splits. See #214 | `False` |
-| `--segmentation-model` | Hugging Face model ID for Diart segmentation model. [Available models](https://github.com/juanmc2005/diart/tree/main?tab=readme-ov-file#pre-trained-models) | `pyannote/segmentation-3.0` |
-| `--embedding-model` | Hugging Face model ID for Diart embedding model. [Available models](https://github.com/juanmc2005/diart/tree/main?tab=readme-ov-file#pre-trained-models) | `pyannote/embedding` |
-
-| SimulStreaming backend options | Description | Default |
-|-----------|-------------|---------|
-| `--disable-fast-encoder` | Disable Faster Whisper or MLX Whisper backends for the encoder (if installed). Inference can be slower but helpful when GPU memory is limited | `False` |
-| `--custom-alignment-heads` | Use your own alignment heads, useful when `--model-dir` is used. Use `scripts/determine_alignment_heads.py` to extract them. <img src="scripts/alignment_heads_qwen3_asr_1.7B.png" alt="WhisperLiveKit Demo" width="300">
- | `None` |
-| `--frame-threshold` | AlignAtt frame threshold (lower = faster, higher = more accurate) | `25` |
-| `--beams` | Number of beams for beam search (1 = greedy decoding) | `1` |
-| `--decoder` | Force decoder type (`beam` or `greedy`) | `auto` |
-| `--audio-max-len` | Maximum audio buffer length (seconds) | `30.0` |
-| `--audio-min-len` | Minimum audio length to process (seconds) | `0.0` |
-| `--cif-ckpt-path` | Path to CIF model for word boundary detection | `None` |
-| `--never-fire` | Never truncate incomplete words | `False` |
-| `--init-prompt` | Initial prompt for the model | `None` |
-| `--static-init-prompt` | Static prompt that doesn't scroll | `None` |
-| `--max-context-tokens` | Maximum context tokens | Depends on model used, but usually 448. |
-
-
-
-| WhisperStreaming backend options | Description | Default |
-|-----------|-------------|---------|
-| `--confidence-validation` | Use confidence scores for faster validation | `False` |
-| `--buffer_trimming` | Buffer trimming strategy (`sentence` or `segment`) | `segment` |
-
-
-
-
-> For diarization using Diart, you need to accept user conditions [here](https://huggingface.co/pyannote/segmentation) for the `pyannote/segmentation` model, [here](https://huggingface.co/pyannote/segmentation-3.0) for the `pyannote/segmentation-3.0` model and [here](https://huggingface.co/pyannote/embedding) for the `pyannote/embedding` model. **Then**, login to HuggingFace: `huggingface-cli login`
-
-### 🚀 Deployment Guide
-
-To deploy WhisperLiveKit in production:
- 
-1. **Server Setup**: Install production ASGI server & launch with multiple workers
-   ```bash
-   pip install uvicorn gunicorn
-   gunicorn -k uvicorn.workers.UvicornWorker -w 4 your_app:app
-   ```
-
-2. **Frontend**: Host your customized version of the `html` example & ensure WebSocket connection points correctly
-
-3. **Nginx Configuration** (recommended for production):
-    ```nginx    
-   server {
-       listen 80;
-       server_name your-domain.com;
-        location / {
-            proxy_pass http://localhost:8000;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-    }}
+1.  Clone o repositório:
+    ```bash
+    git clone https://github.com/leonmachado91/WhisperPlus.git
+    cd WhisperPlus
     ```
+2.  Crie um ambiente virtual e instale as dependências (utilizando `uv` é recomendado por ser mais rápido, mas `pip` também funciona):
+    ```bash
+    uv venv
+    call .venv\Scripts\activate
+    uv sync --extra cu129 --extra diarization-diart
+    ```
+    > _Nota: Se você não tiver GPU, utilize a flag `--extra cpu`._
 
-4. **HTTPS Support**: For secure deployments, use "wss://" instead of "ws://" in WebSocket URL
+3.  Login no HuggingFace (Opcional, apenas necessário para **Diarização com Diart/Pyannote**):
+    ```bash
+    huggingface-cli login
+    ```
+    *(Você também precisará aceitar os termos de uso dos modelos `pyannote/segmentation-3.0` e `pyannote/embedding` no HuggingFace).*
 
-## 🐋 Docker
+### Uso Diário
 
-Deploy the application easily using Docker with GPU or CPU support.
+Você pode iniciar o servidor de duas maneiras:
 
-### Prerequisites
-- Docker installed on your system
-- For GPU support: NVIDIA Docker runtime installed
+**1. Usando o executável (Mais Fácil)**
+Dê um duplo clique no arquivo **`WhisperPlus.exe`**.
+Ele abrirá um terminal rodando o servidor em plano de fundo e carregará a interface web no seu navegador padrão (`http://localhost:8000`).
 
-### Quick Start
-
-**With GPU acceleration (recommended):**
-```bash
-docker build -t wlk .
-docker run --gpus all -p 8000:8000 --name wlk wlk
+**2. Pelo script base**
+```cmd
+start.bat
 ```
+*(Abra `http://localhost:8000` no seu navegador manualmente).*
 
-**CPU only:**
-```bash
-docker build -f Dockerfile.cpu -t wlk --build-arg EXTRAS="cpu" .
-docker run -p 8000:8000 --name wlk wlk
+---
+
+## 📂 Modo Folder Watch (Arquivos Offline)
+
+O WhisperPlus não é apenas para gravação ao vivo pelo microfone. Se você possui longas gravações ou vídeos e quer processá-los automaticamente:
+
+1.  Abra a interface web do WhisperPlus.
+2.  Desça até a seção "Offline File Transcription (Folder Watch)".
+3.  Clique em **Start Folder Watch Mode**.
+4.  Jogue qualquer arquivo `.wav`, `.mp3`, `.m4a`, `.mp4` na pasta raiz **`input/`**.
+5.  O servidor começará a processá-los um a um e salvará o resultado (junto com timestamps e divisão de oradores, se ativa) na pasta **`output/`**. Os arquivos processados são movidos para a subpasta `input/done/`.
+
+---
+
+## 🛠️ Configurações Avançadas
+
+A partir da Interface Web, você tem acesso aos seguintes parâmetros:
+*   **Modelo de Transcrição**: Escolha o tamanho do modelo (ex: `medium`, `large-v3`, `large-v3-turbo`). Modelos maiores oferecem precisão incomparável, mas requerem mais VRAM na GPU.
+*   **Identificação de Oradores (Diarização)**: Separa as vozes "Speaker 0", "Speaker 1" etc.
+*   **Correção de Nomes**: O Whisper pode errar o nome da sua empresa. Use esta aba para criar regras `"errado:Correto"`.
+*   **Prompt de Contexto**: Ensine gírias ou jargões da sua área passando um contexto que ajudará na decodificação, sem forçar regras estritas sobre as palavras.
+
+---
+
+## 📦 Desenvolvedores: Como Gerar um novo `.exe`
+
+Se você modificar o arquivo `launcher.py`, basta compilar um novo executável:
+
+```cmd
+build_launcher.bat
 ```
-
-### Advanced Usage
-
-**Custom configuration:**
-```bash
-# Example with custom model and language
-docker run --gpus all -p 8000:8000 --name wlk wlk --model large-v3 --language fr
-```
-
-**Compose (recommended for cache + token wiring):**
-```bash
-# GPU Sortformer profile
-docker compose up --build wlk-gpu-sortformer
-
-# GPU Voxtral profile
-docker compose up --build wlk-gpu-voxtral
-
-# CPU service
-docker compose up --build wlk-cpu
-```
-
-### Memory Requirements
-- **Large models**: Ensure your Docker runtime has sufficient memory allocated
-
-
-#### Customization
-
-- `--build-arg` Options:
-  - `EXTRAS="cu129,diarization-sortformer"` - GPU Sortformer profile extras.
-  - `EXTRAS="cu129,voxtral-hf,translation"` - GPU Voxtral profile extras.
-  - `EXTRAS="cpu,diarization-diart,translation"` - CPU profile extras.
-  - Hugging Face cache + token are configured in `compose.yml` using a named volume and `HF_TKN_FILE` (default: `./token`).
-
-## Testing & Benchmarks
-
-```bash
-# Quick benchmark with the CLI
-wlk bench
-wlk bench --backend faster-whisper --model large-v3
-wlk bench --languages all --json results.json
-
-# Install test dependencies for full suite
-pip install -e ".[test]"
-
-# Run unit tests (no model download required)
-pytest tests/ -v
-
-# Speed vs Accuracy scatter plot (all backends, compute-aware + unaware)
-python scripts/create_long_samples.py        # generate ~90s test samples (cached)
-python scripts/run_scatter_benchmark.py      # English (both modes)
-python scripts/run_scatter_benchmark.py --lang fr  # French
-```
-
-## Use Cases
-Capture discussions in real-time for meeting transcription, help hearing-impaired users follow conversations through accessibility tools, transcribe podcasts or videos automatically for content creation, transcribe support calls with speaker identification for customer service...
+O novo `WhisperPlus.exe` será gerado dentro da pasta `dist/`. Basta copiá-lo para a raiz e deletar as pastas geradas `build/` e `dist/`.

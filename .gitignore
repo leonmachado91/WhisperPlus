@@ -135,3 +135,11 @@ models/
 .agents/
 _agents/
 _agent/
+
+# WhisperPlus local files
+WhisperPlus.exe
+transcription_live.txt
+live.txt
+input/
+output/
+docs/log.txt
