@@ -234,7 +234,7 @@ class TranscriptionEngine:
                 )
 
 
-def online_factory(args, asr, language=None):
+def online_factory(args, asr, language=None, init_prompt=None, word_replacements=None):
     """Create an online ASR processor for a session.
 
     Args:
@@ -243,6 +243,10 @@ def online_factory(args, asr, language=None):
         language: Optional per-session language override (e.g. "en", "fr", "auto").
             If provided and the backend supports it, transcription will use
             this language instead of the server-wide default.
+        init_prompt: Optional initial prompt to bias transcription output
+            (e.g. proper nouns, spelling hints). Passed to OnlineASRProcessor.
+        word_replacements: Optional dict of word replacements for post-processing.
+            Keys are wrong spellings, values are correct spellings.
     """
     # Wrap the shared ASR with a per-session language if requested
     if language is not None:
@@ -272,11 +276,11 @@ def online_factory(args, asr, language=None):
         from whisperlivekit.voxtral_hf_streaming import VoxtralHFStreamingOnlineProcessor
         return VoxtralHFStreamingOnlineProcessor(asr)
     if backend == "qwen3":
-        return OnlineASRProcessor(asr)
+        return OnlineASRProcessor(asr, init_prompt=init_prompt, word_replacements=word_replacements)
     if args.backend_policy == "simulstreaming":
         from whisperlivekit.simul_whisper import SimulStreamingOnlineProcessor
         return SimulStreamingOnlineProcessor(asr)
-    return OnlineASRProcessor(asr)
+    return OnlineASRProcessor(asr, init_prompt=init_prompt, word_replacements=word_replacements)
 
 
 def online_diarization_factory(args, diarization_backend):

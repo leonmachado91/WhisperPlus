@@ -130,7 +130,11 @@ class AudioProcessor:
         self.diarization: Optional[Any] = None
 
         if self.args.transcription:
-            self.transcription = online_factory(self.args, models.asr, language=session_language)
+            self.transcription = online_factory(
+                self.args, models.asr, language=session_language,
+                init_prompt=getattr(self.args, 'init_prompt', None),
+                word_replacements=getattr(self.args, 'word_replacements', None),
+            )
             self.sep = self.transcription.asr.sep
         if self.args.diarization:
             self.diarization = online_diarization_factory(self.args, models.diarization_model)

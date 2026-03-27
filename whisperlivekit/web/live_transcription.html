@@ -9,6 +9,14 @@
 </head>
 
 <body>
+    <!-- Loading overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p id="loadingMessage">Connecting...</p>
+        </div>
+    </div>
+
     <div class="header-container">
         <div class="main-controls">
             <div class="buttons-container">
@@ -25,7 +33,9 @@
                 </button>
 
                 <button id="pauseButton" title="Pause (Global)" disabled>
-                    <img src="/web/src/pause.svg" alt="Pause" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'%23111\' width=\'24\' height=\'24\'><path d=\'M6 19h4V5H6v14zm8-14v14h4V5h-4z\'/></svg>'" />
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                    </svg>
                 </button>
 
                 <button id="settingsToggle" class="settings-toggle" title="Settings">
@@ -69,8 +79,9 @@
                         <option value="tiny">Tiny</option>
                         <option value="base">Base</option>
                         <option value="small">Small</option>
-                        <option value="medium" selected>Medium</option>
+                        <option value="medium">Medium</option>
                         <option value="large-v3">Large-v3</option>
+                        <option value="large-v3-turbo" selected>Large-v3-Turbo</option>
                     </select>
                 </div>
 
@@ -88,13 +99,20 @@
                 </div>
 
                 <div class="field">
-                    <label for="outputFileInput">Output File Name</label>
-                    <input id="outputFileInput" type="text" placeholder="e.g. session_1.txt" value="transcription_live.txt" />
+                    <label for="outputFileInput">Output File Name / Path</label>
+                    <input id="outputFileInput" type="text" placeholder="e.g. C:/Live/session.txt or just session.txt" value="transcription_live.txt" />
+                    <small style="color:var(--muted); font-size: 0.8em; margin-top:4px; display:block"> Pode usar caminhos do Windows (C:\pastas\arquivo.txt) ou apenas o nome.</small>
                 </div>
 
                 <div class="field full-width">
                     <label for="initialPromptInput">Initial Prompt (Context / Jargon)</label>
                     <textarea id="initialPromptInput" placeholder="Enter terms separated by commas, e.g., RPG character names..." rows="3"></textarea>
+                </div>
+
+                <div class="field full-width">
+                    <label for="wordReplacementsInput">Word Replacements (Force Spelling)</label>
+                    <textarea id="wordReplacementsInput" placeholder="wrong:correct, e.g. Julio:Giulio, jeff:Jeff" rows="2"></textarea>
+                    <small style="color:var(--muted); font-size: 0.8em; margin-top:4px; display:block">Força a grafia correta de nomes. Formato: errado:correto separados por vírgula.</small>
                 </div>
 
                 <fieldset class="field full-width shortcuts-fieldset">

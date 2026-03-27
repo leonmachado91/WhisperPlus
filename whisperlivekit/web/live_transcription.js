@@ -32,6 +32,17 @@ const configReady = new Promise((r) => (configReadyResolve = r));
 let outputAudioContext = null;
 let audioSource = null;
 
+// Loading overlay helpers
+const loadingOverlay = document.getElementById("loadingOverlay");
+const loadingMessage = document.getElementById("loadingMessage");
+function showLoading(msg) {
+  if (loadingMessage) loadingMessage.textContent = msg || "Loading...";
+  if (loadingOverlay) loadingOverlay.style.display = "flex";
+}
+function hideLoading() {
+  if (loadingOverlay) loadingOverlay.style.display = "none";
+}
+
 waveCanvas.width = 60 * (window.devicePixelRatio || 1);
 waveCanvas.height = 30 * (window.devicePixelRatio || 1);
 waveCtx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
@@ -57,6 +68,7 @@ const diarizationToggle = document.getElementById("diarizationToggle");
 const modeSelect = document.getElementById("modeSelect");
 const outputFileInput = document.getElementById("outputFileInput");
 const initialPromptInput = document.getElementById("initialPromptInput");
+const wordReplacementsInput = document.getElementById("wordReplacementsInput");
 
 const shortcutRecordInput = document.getElementById("shortcutRecord");
 const shortcutPauseInput = document.getElementById("shortcutPause");
@@ -64,6 +76,47 @@ const shortcutPauseInput = document.getElementById("shortcutPause");
 let isPaused = false;
 let activeRecordingTime = 0;
 let lastTimerTick = null;
+
+// --------------------------------------------------------------------------- //
+// localStorage persistence for all settings
+// --------------------------------------------------------------------------- //
+function saveSettings() {
+  const data = {
+    model: modelSelect ? modelSelect.value : null,
+    diarization: diarizationToggle ? diarizationToggle.checked : false,
+    systemAudio: systemAudioToggle ? systemAudioToggle.checked : false,
+    outputFile: outputFileInput ? outputFileInput.value : null,
+    prompt: initialPromptInput ? initialPromptInput.value : null,
+    wordReplacements: wordReplacementsInput ? wordReplacementsInput.value : null,
+    opMode: modeSelect ? modeSelect.value : null,
+    shortcutRecord: shortcutRecordInput ? shortcutRecordInput.value : null,
+    shortcutPause: shortcutPauseInput ? shortcutPauseInput.value : null,
+    wsUrl: websocketInput ? websocketInput.value : null,
+  };
+  localStorage.setItem('wlk_settings', JSON.stringify(data));
+}
+
+function restoreSettings() {
+  try {
+    const raw = localStorage.getItem('wlk_settings');
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s.model && modelSelect) modelSelect.value = s.model;
+    if (s.diarization !== undefined && diarizationToggle) diarizationToggle.checked = s.diarization;
+    if (s.systemAudio !== undefined && systemAudioToggle) systemAudioToggle.checked = s.systemAudio;
+    if (s.outputFile && outputFileInput) outputFileInput.value = s.outputFile;
+    if (s.prompt && initialPromptInput) initialPromptInput.value = s.prompt;
+    if (s.wordReplacements && wordReplacementsInput) wordReplacementsInput.value = s.wordReplacements;
+    if (s.opMode && modeSelect) modeSelect.value = s.opMode;
+    if (s.shortcutRecord && shortcutRecordInput) shortcutRecordInput.value = s.shortcutRecord;
+    if (s.shortcutPause && shortcutPauseInput) shortcutPauseInput.value = s.shortcutPause;
+    if (s.wsUrl && websocketInput) { websocketInput.value = s.wsUrl; websocketUrl = s.wsUrl; }
+  } catch (e) {
+    console.warn('Failed to restore settings from localStorage', e);
+  }
+}
+
+restoreSettings();
 
 // if (isExtension) {
 //   chrome.runtime.onInstalled.addListener((details) => {
@@ -237,7 +290,8 @@ function setupWebSocket() {
       if (diarizationToggle && diarizationToggle.checked) params.append("diarization", "true");
       if (outputFileInput && outputFileInput.value) params.append("output_file", outputFileInput.value);
       if (initialPromptInput && initialPromptInput.value) params.append("initial_prompt", initialPromptInput.value);
-      if (modeSelect && modeSelect.value) params.append("mode", modeSelect.value);
+      if (wordReplacementsInput && wordReplacementsInput.value) params.append("word_replacements", wordReplacementsInput.value);
+      if (modeSelect && modeSelect.value) params.append("op_mode", modeSelect.value);
       
       const queryString = params.toString();
       if (queryString) {
@@ -294,6 +348,9 @@ function setupWebSocket() {
       const data = JSON.parse(event.data);
       if (data.type === "config") {
         serverUseAudioWorklet = !!data.useAudioWorklet;
+        // Sync UI with what model the server actually loaded
+        if (data.model && modelSelect) modelSelect.value = data.model;
+        if (data.diarization !== undefined && diarizationToggle) diarizationToggle.checked = data.diarization;
         statusText.textContent = serverUseAudioWorklet
           ? "Connected. Using AudioWorklet (PCM)."
           : "Connected. Using MediaRecorder (WebM).";
@@ -600,6 +657,8 @@ async function startRecording() {
         stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
         statusText.textContent = "Using microphone audio.";
       }
+    }
+    
     if (isWebContext) {
       const audioConstraints = selectedMicrophoneId 
         ? { audio: { deviceId: { exact: selectedMicrophoneId }, echoCancellation: true, noiseSuppression: true } }
@@ -796,23 +855,33 @@ async function toggleRecording() {
       console.log("Waiting for stop, early return");
       return;
     }
+    // Anti-double-click: disable button immediately
+    recordButton.disabled = true;
+    showLoading("Connecting...");
     console.log("Connecting to WebSocket");
     try {
       if (websocket && websocket.readyState === WebSocket.OPEN) {
         await configReady;
+        hideLoading();
         await startRecording();
       } else {
         await setupWebSocket();
         await configReady;
+        hideLoading();
         await startRecording();
       }
     } catch (err) {
+      hideLoading();
       statusText.textContent = "Could not connect to WebSocket or access mic. Aborted.";
       console.error(err);
+    } finally {
+      recordButton.disabled = false;
     }
   } else {
     console.log("Stopping recording");
+    showLoading("Stopping...");
     stopRecording();
+    hideLoading();
   }
 }
 
@@ -934,6 +1003,7 @@ function handleShortcutInput(e) {
   if (["Ctrl", "Alt", "Shift"].includes(keyIdentifier)) return;
   
   e.target.value = keyIdentifier;
+  saveSettings();
 }
 
 if (shortcutRecordInput) shortcutRecordInput.addEventListener("keydown", handleShortcutInput);
@@ -945,7 +1015,19 @@ document.querySelectorAll(".clear-shortcut").forEach(btn => {
      if (targetId) {
          document.getElementById(targetId).value = "";
      }
+     saveSettings();
   });
+});
+
+// Attach saveSettings to all setting inputs
+[modelSelect, modeSelect].forEach(el => {
+  if (el) el.addEventListener("change", saveSettings);
+});
+[diarizationToggle, systemAudioToggle].forEach(el => {
+  if (el) el.addEventListener("change", saveSettings);
+});
+[outputFileInput, initialPromptInput, websocketInput].forEach(el => {
+  if (el) el.addEventListener("input", saveSettings);
 });
 if (isExtension) {
   async function checkAndRequestPermissions() {

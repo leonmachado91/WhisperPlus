@@ -1,6 +1,7 @@
 import logging
+import re
 import sys
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -109,6 +110,8 @@ class OnlineASRProcessor:
         self,
         asr,
         logfile=sys.stderr,
+        init_prompt: Optional[str] = None,
+        word_replacements: Optional[Dict[str, str]] = None,
     ):
         """
         asr: An ASR system object (for example, a WhisperASR instance) that
@@ -116,12 +119,30 @@ class OnlineASRProcessor:
              a `segments_end_ts` method, and a separator attribute `sep`.
         tokenize_method: A function that receives text and returns a list of sentence strings.
         buffer_trimming: A tuple (option, seconds), where option is either "sentence" or "segment".
+        init_prompt: Optional initial prompt to bias transcription (e.g. proper nouns,
+            spelling hints). Prepended to the prompt on every transcribe call so the
+            Whisper decoder is always conditioned on it.
+        word_replacements: Optional dict mapping words to their replacements.
+            Applied as case-insensitive post-processing on each token.
+            Example: {"Julio": "Giulio", "whats app": "WhatsApp"}
         """
         self.asr = asr
         self.tokenize = asr.tokenizer
         self.logfile = logfile
         self.confidence_validation = asr.confidence_validation
         self.global_time_offset = 0.0
+        self.init_prompt = init_prompt or ""
+        if self.init_prompt:
+            logger.info("OnlineASRProcessor using init_prompt: %s", self.init_prompt)
+
+        # Build compiled regex patterns for word replacements
+        self.word_replacements: List[Tuple[re.Pattern, str]] = []
+        if word_replacements:
+            for wrong, correct in word_replacements.items():
+                pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+                self.word_replacements.append((pattern, correct))
+            logger.info("Word replacements active: %s", word_replacements)
+
         self.init()
 
         self.buffer_trimming_way = asr.buffer_trimming
@@ -135,6 +156,9 @@ class OnlineASRProcessor:
             logger.warning(
                 f"buffer_trimming_sec is set to {self.buffer_trimming_sec}, which is very long. It may cause OOM."
             )
+
+        if self.init_prompt:
+            logger.info("Using init_prompt: %s", self.init_prompt[:100])
 
     def new_speaker(self, change_speaker):
         """Handle speaker change event."""
@@ -188,7 +212,8 @@ class OnlineASRProcessor:
         """
         Returns a tuple: (prompt, context), where:
           - prompt is a 200-character suffix of committed text that falls
-            outside the current audio buffer.
+            outside the current audio buffer, prepended with init_prompt
+            if configured.
           - context is the committed text within the current audio buffer.
         """
         k = len(self.committed)
@@ -206,7 +231,20 @@ class OnlineASRProcessor:
             prompt_list.append(word)
         non_prompt_tokens = self.committed[k:]
         context_text = self.asr.sep.join(token.text for token in non_prompt_tokens)
-        return self.asr.sep.join(prompt_list[::-1]), context_text
+
+        committed_prompt = self.asr.sep.join(prompt_list[::-1])
+
+        # Prepend init_prompt so the Whisper decoder is always conditioned
+        # on user-defined spelling hints (e.g. proper nouns like "Giulio").
+        if self.init_prompt:
+            if committed_prompt:
+                full_prompt = self.init_prompt + " " + committed_prompt
+            else:
+                full_prompt = self.init_prompt
+        else:
+            full_prompt = committed_prompt
+
+        return full_prompt, context_text
 
     def get_buffer(self):
         """
@@ -228,6 +266,13 @@ class OnlineASRProcessor:
         )
         res = self.asr.transcribe(self.audio_buffer, init_prompt=prompt_text)
         tokens = self.asr.ts_words(res)
+
+        # Apply word replacements to token texts
+        if self.word_replacements:
+            for token in tokens:
+                for pattern, replacement in self.word_replacements:
+                    token.text = pattern.sub(replacement, token.text)
+
         self.transcript_buffer.insert(tokens, self.buffer_time_offset)
         committed_tokens = self.transcript_buffer.flush()
         self.committed.extend(committed_tokens)

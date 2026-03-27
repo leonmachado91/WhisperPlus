@@ -11,8 +11,10 @@ A linguagem está fixada em pt (português).
 """
 
 import asyncio
+import copy
 import logging
 import os
+import subprocess
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -34,7 +36,6 @@ logger.setLevel(logging.DEBUG)
 config = parse_args()
 
 # Force language to Portuguese
-config.language = "pt"
 config.lan = "pt"
 
 # Extra arg: output file (env var or default)
@@ -80,6 +81,12 @@ class TranscriptionFileExporter:
         self.filepath = filepath
         self.session_start = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         self.last_content = ""
+
+        # Create directory if it doesn't exist
+        abs_path = os.path.abspath(self.filepath)
+        dir_path = os.path.dirname(abs_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
 
         # Create / clear the file at start
         with open(self.filepath, "w", encoding="utf-8") as f:
@@ -136,7 +143,6 @@ class TranscriptionFileExporter:
             logger.error("Failed to write transcription file: %s", e)
 
 
-import copy
 
 # --------------------------------------------------------------------------- #
 # WebSocket handler (same as basic_server + file export hook)
@@ -169,7 +175,7 @@ async def handle_websocket_results(websocket, results_generator, exporter, diff_
     except asyncio.CancelledError:
         logger.info("Results handler cancelled.")
     except Exception as e:
-        logger.exception(f"Error in WebSocket results handler: {e}")
+        logger.exception("Error in WebSocket results handler: %s", e)
 
 
 # --------------------------------------------------------------------------- #
@@ -198,13 +204,30 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # Force Portuguese regardless of what the client sends
     session_language = "pt"
+
+    # Diff protocol mode (full/diff) — separate from operation mode
     mode = websocket.query_params.get("mode", "full")
+    # Operation mode (live/folder) — renamed to avoid collision with diff protocol
+    op_mode = websocket.query_params.get("op_mode", "live")
     
     # Extract custom client settings
     client_model = websocket.query_params.get("model", getattr(config, 'model_size', 'medium'))
     client_diarization = websocket.query_params.get("diarization", "false").lower() == "true"
     client_output_file = websocket.query_params.get("output_file", OUTPUT_FILE)
     client_initial_prompt = websocket.query_params.get("initial_prompt", "")
+
+    # Parse word_replacements: format "wrong1:correct1,wrong2:correct2"
+    raw_replacements = websocket.query_params.get("word_replacements", "")
+    client_word_replacements = None
+    if raw_replacements:
+        client_word_replacements = {}
+        for pair in raw_replacements.split(","):
+            pair = pair.strip()
+            if ":" in pair:
+                wrong, correct = pair.split(":", 1)
+                wrong, correct = wrong.strip(), correct.strip()
+                if wrong and correct:
+                    client_word_replacements[wrong] = correct
 
     current_model = getattr(transcription_engine.config, 'model_size', None)
     current_diarization = getattr(transcription_engine.config, 'diarization', False)
@@ -214,25 +237,27 @@ async def websocket_endpoint(websocket: WebSocket):
         TranscriptionEngine.reset()
         new_config = copy.copy(config)
         new_config.model_size = client_model
-        new_config.model_path = client_model # Often same as model_size for WhisperLiveKit
+        new_config.model_path = None  # Let backend resolve to "Systran/faster-whisper-{size}"
         new_config.diarization = client_diarization
+        new_config.init_prompt = client_initial_prompt or None
         transcription_engine = TranscriptionEngine(config=new_config)
+    elif client_initial_prompt:
+        # Same model, but update init_prompt for the current session
+        # Must update BOTH config and args (Namespace snapshot) since
+        # AudioProcessor reads from args, not config directly.
+        transcription_engine.config.init_prompt = client_initial_prompt
+        transcription_engine.args.init_prompt = client_initial_prompt
+
+    # Always set word_replacements on args so AudioProcessor picks them up
+    transcription_engine.args.word_replacements = client_word_replacements
 
     audio_processor = AudioProcessor(
         transcription_engine=transcription_engine,
         language=session_language,
     )
-    
-    if client_initial_prompt and hasattr(audio_processor, 'transcription') and audio_processor.transcription:
-        orig_prompt_method = audio_processor.transcription.prompt
-        def custom_prompt():
-            prompt_text, context_text = orig_prompt_method()
-            new_prompt = f"{client_initial_prompt} {prompt_text}".strip()
-            return new_prompt, context_text
-        audio_processor.transcription.prompt = custom_prompt
 
     await websocket.accept()
-    logger.info(f"WebSocket connection opened. language=pt, model={client_model}, diarization={client_diarization}")
+    logger.info(f"WebSocket connection opened. language=pt, model={client_model}, diarization={client_diarization}, prompt={client_initial_prompt[:50] if client_initial_prompt else 'none'}")
 
     diff_tracker = None
     if mode == "diff":
@@ -243,11 +268,17 @@ async def websocket_endpoint(websocket: WebSocket):
     exporter = TranscriptionFileExporter(client_output_file)
 
     try:
-        await websocket.send_json({"type": "config", "useAudioWorklet": bool(config.pcm_input), "mode": mode})
+        await websocket.send_json({
+            "type": "config",
+            "useAudioWorklet": bool(config.pcm_input),
+            "mode": mode,
+            "model": client_model,
+            "diarization": client_diarization,
+        })
     except Exception as e:
         logger.warning(f"Failed to send config to client: {e}")
 
-    if mode == "folder":
+    if op_mode == "folder":
         # =====================================================================
         # Folder Watch Mode
         # =====================================================================
@@ -286,18 +317,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         raise WebSocketDisconnect()
                         
                     # Create new audio_processor for this file
+                    # Force PCM mode: our external ffmpeg already decodes to s16le,
+                    # so the processor must NOT try to decode via its internal FFmpeg.
                     file_processor = AudioProcessor(
                         transcription_engine=transcription_engine,
                         language=session_language,
                     )
-                    
-                    if client_initial_prompt and hasattr(file_processor, 'transcription') and file_processor.transcription:
-                        orig_prompt_method = file_processor.transcription.prompt
-                        def file_custom_prompt(orig=orig_prompt_method):
-                            prompt_text, context_text = orig()
-                            new_prompt = f"{client_initial_prompt} {prompt_text}".strip()
-                            return new_prompt, context_text
-                        file_processor.transcription.prompt = file_custom_prompt
+                    file_processor.is_pcm_input = True
+                    if file_processor.ffmpeg_manager:
+                        await file_processor.ffmpeg_manager.stop()
+                        file_processor.ffmpeg_manager = None
 
                     file_output_path = output_dir / f"{file_path.stem}.txt"
                     file_exporter = TranscriptionFileExporter(str(file_output_path))
@@ -307,31 +336,36 @@ async def websocket_endpoint(websocket: WebSocket):
                         handle_websocket_results(websocket, file_results_generator, file_exporter, None)
                     )
                     
-                    # Convert audio and stream to processor
+                    # Convert audio file to raw PCM and stream to processor
                     command = [
                         "ffmpeg", "-i", str(file_path),
                         "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1"
                     ]
-                    import subprocess
                     process = await asyncio.create_subprocess_exec(
                         *command,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL
                     )
                     
-                    chunk_size = 32000 # ~1 second
+                    chunk_size = 32000  # ~1 second of 16kHz mono s16le
                     while True:
                         chunk = await process.stdout.read(chunk_size)
                         if not chunk:
                             break
                         await file_processor.process_audio(chunk)
-                        await asyncio.sleep(0.005) # Yield control
+                        await asyncio.sleep(0.005)  # Yield control
                         
                     await process.wait()
                     
-                    # Cleanup processor for this file
-                    file_processor.is_stopping = True
-                    await asyncio.sleep(0.5)
+                    # Signal end-of-stream gracefully (triggers flush + SENTINEL)
+                    await file_processor.process_audio(b"")
+                    
+                    # Wait for results to finish (up to 30s)
+                    for _ in range(60):
+                        if file_ws_task.done():
+                            break
+                        await asyncio.sleep(0.5)
+                    
                     if not file_ws_task.done():
                         file_ws_task.cancel()
                         try:
