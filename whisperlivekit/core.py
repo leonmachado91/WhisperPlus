@@ -211,8 +211,8 @@ class TranscriptionEngine:
                 from whisperlivekit.diarization.diart_backend import DiartDiarization
                 self.diarization_model = DiartDiarization(
                     block_duration=config.min_chunk_size,
-                    segmentation_model=config.segmentation_model,
-                    embedding_model=config.embedding_model,
+                    segmentation_model_name=config.segmentation_model,
+                    embedding_model_name=config.embedding_model,
                 )
             elif config.diarization_backend == "sortformer":
                 from whisperlivekit.diarization.sortformer_backend import SortformerDiarization

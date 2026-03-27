@@ -10,6 +10,7 @@ from whisperlivekit.timed_objects import (
     SpeakerSegment,
     TimedText,
 )
+from whisperlivekit.diarization.utils import extract_number
 
 _DEFAULT_RETENTION_SECONDS: float = 300.0
 
@@ -197,7 +198,7 @@ class TokensAlignment:
                         intersec = self.intersection_duration(punctuation_segment, diarization_segment)
                         if intersec > max_overlap:
                             max_overlap = intersec
-                            max_overlap_speaker = diarization_segment.speaker + 1
+                            max_overlap_speaker = (extract_number(diarization_segment.speaker) if isinstance(diarization_segment.speaker, str) else diarization_segment.speaker) + 1
                     punctuation_segment.speaker = max_overlap_speaker
 
         segments = []
