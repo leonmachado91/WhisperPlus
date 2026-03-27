@@ -129,3 +129,9 @@ nllb-200-distilled-600M-ctranslate2/*
 *.mp3
 .hf_cache/
 models/
+
+# Agents and Skills
+.agent/
+.agents/
+_agents/
+_agent/

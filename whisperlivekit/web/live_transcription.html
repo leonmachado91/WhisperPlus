@@ -10,9 +10,9 @@
 
 <body>
     <div class="header-container">
-        <div class="settings-container">
+        <div class="main-controls">
             <div class="buttons-container">
-                <button id="recordButton">
+                <button id="recordButton" title="Record (Global)">
                     <div class="shape-container">
                         <div class="shape"></div>
                     </div>
@@ -24,25 +24,94 @@
                     </div>
                 </button>
 
-                <button id="settingsToggle" class="settings-toggle" title="Show/hide settings">
+                <button id="pauseButton" title="Pause (Global)" disabled>
+                    <img src="/web/src/pause.svg" alt="Pause" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'%23111\' width=\'24\' height=\'24\'><path d=\'M6 19h4V5H6v14zm8-14v14h4V5h-4z\'/></svg>'" />
+                </button>
+
+                <button id="settingsToggle" class="settings-toggle" title="Settings">
                     <img src="web/src/settings.svg" alt="Settings" />
                 </button>
             </div>
+        </div>
 
-            <div class="settings">
+        <p id="status"></p>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content settings">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button id="closeModal" class="close-btn">&times;</button>
+            </div>
+
+            <div class="settings-grid">
                 <div class="field">
                     <label for="websocketInput">Websocket URL</label>
                     <input id="websocketInput" type="text" placeholder="ws://host:port/asr" />
                 </div>
 
                 <div class="field">
-                    <label id="microphoneSelectLabel" for="microphoneSelect">Select Microphone</label>
+                    <label for="microphoneSelect">Microphone</label>
                     <select id="microphoneSelect">
                         <option value="">Default Microphone</option>
                     </select>
                 </div>
 
-                <div class="theme-selector-container">
+                <div class="field checkbox-field">
+                    <input type="checkbox" id="systemAudioToggle" />
+                    <label for="systemAudioToggle">Capture System Audio (Mix)</label>
+                </div>
+
+                <div class="field">
+                    <label for="modelSelect">Whisper Model</label>
+                    <select id="modelSelect">
+                        <option value="tiny">Tiny</option>
+                        <option value="base">Base</option>
+                        <option value="small">Small</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="large-v3">Large-v3</option>
+                    </select>
+                </div>
+
+                <div class="field checkbox-field">
+                    <input type="checkbox" id="diarizationToggle" />
+                    <label for="diarizationToggle">Enable Diarization (Speaker ID)</label>
+                </div>
+
+                <div class="field">
+                    <label for="modeSelect">Operation Mode</label>
+                    <select id="modeSelect">
+                        <option value="live">Live Transcription</option>
+                        <option value="folder">Folder Watch Mode</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label for="outputFileInput">Output File Name</label>
+                    <input id="outputFileInput" type="text" placeholder="e.g. session_1.txt" value="transcription_live.txt" />
+                </div>
+
+                <div class="field full-width">
+                    <label for="initialPromptInput">Initial Prompt (Context / Jargon)</label>
+                    <textarea id="initialPromptInput" placeholder="Enter terms separated by commas, e.g., RPG character names..." rows="3"></textarea>
+                </div>
+
+                <fieldset class="field full-width shortcuts-fieldset">
+                    <legend>Global Shortcuts</legend>
+                    <div class="shortcut-row">
+                        <label for="shortcutRecord">Record/Stop:</label>
+                        <input id="shortcutRecord" type="text" placeholder="Press a key..." readonly />
+                        <button class="clear-shortcut" data-target="shortcutRecord" title="Clear Shortcut">&times;</button>
+                    </div>
+                    <div class="shortcut-row">
+                        <label for="shortcutPause">Pause/Resume:</label>
+                        <input id="shortcutPause" type="text" placeholder="Press a key..." readonly />
+                        <button class="clear-shortcut" data-target="shortcutPause" title="Clear Shortcut">&times;</button>
+                    </div>
+                </fieldset>
+
+                <div class="field full-width theme-selector-container">
                     <div class="segmented" role="radiogroup" aria-label="Theme selector">
                         <input type="radio" id="theme-system" name="theme" value="system" />
                         <label for="theme-system" title="System">
@@ -65,8 +134,6 @@
                 </div>
             </div>
         </div>
-        
-        <p id="status"></p>
     </div>
 
     <div class="transcript-container">

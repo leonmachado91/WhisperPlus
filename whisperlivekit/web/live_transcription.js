@@ -38,6 +38,7 @@ waveCtx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
 
 const statusText = document.getElementById("status");
 const recordButton = document.getElementById("recordButton");
+const pauseButton = document.getElementById("pauseButton");
 const chunkSelector = document.getElementById("chunkSelector");
 const websocketInput = document.getElementById("websocketInput");
 const websocketDefaultSpan = document.getElementById("wsDefaultUrl");
@@ -47,7 +48,22 @@ const themeRadios = document.querySelectorAll('input[name="theme"]');
 const microphoneSelect = document.getElementById("microphoneSelect");
 
 const settingsToggle = document.getElementById("settingsToggle");
-const settingsDiv = document.querySelector(".settings");
+const settingsModal = document.getElementById("settingsModal");
+const closeModal = document.getElementById("closeModal");
+
+const systemAudioToggle = document.getElementById("systemAudioToggle");
+const modelSelect = document.getElementById("modelSelect");
+const diarizationToggle = document.getElementById("diarizationToggle");
+const modeSelect = document.getElementById("modeSelect");
+const outputFileInput = document.getElementById("outputFileInput");
+const initialPromptInput = document.getElementById("initialPromptInput");
+
+const shortcutRecordInput = document.getElementById("shortcutRecord");
+const shortcutPauseInput = document.getElementById("shortcutPause");
+
+let isPaused = false;
+let activeRecordingTime = 0;
+let lastTimerTick = null;
 
 // if (isExtension) {
 //   chrome.runtime.onInstalled.addListener((details) => {
@@ -215,7 +231,19 @@ websocketInput.addEventListener("change", () => {
 function setupWebSocket() {
   return new Promise((resolve, reject) => {
     try {
-      websocket = new WebSocket(websocketUrl);
+      let finalWsUrl = websocketUrl;
+      const params = new URLSearchParams();
+      if (modelSelect && modelSelect.value) params.append("model", modelSelect.value);
+      if (diarizationToggle && diarizationToggle.checked) params.append("diarization", "true");
+      if (outputFileInput && outputFileInput.value) params.append("output_file", outputFileInput.value);
+      if (initialPromptInput && initialPromptInput.value) params.append("initial_prompt", initialPromptInput.value);
+      if (modeSelect && modeSelect.value) params.append("mode", modeSelect.value);
+      
+      const queryString = params.toString();
+      if (queryString) {
+         finalWsUrl += (finalWsUrl.includes("?") ? "&" : "?") + queryString;
+      }
+      websocket = new WebSocket(finalWsUrl);
     } catch (error) {
       statusText.textContent = "Invalid WebSocket URL. Please check and try again.";
       reject(error);
@@ -467,9 +495,15 @@ function renderLinesWithBuffer(
 }
 
 function updateTimer() {
-  if (!startTime) return;
+  if (!isRecording || isPaused) return;
 
-  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const now = Date.now();
+  if (lastTimerTick) {
+      activeRecordingTime += (now - lastTimerTick);
+  }
+  lastTimerTick = now;
+
+  const elapsed = Math.floor(activeRecordingTime / 1000);
   const minutes = Math.floor(elapsed / 60).toString().padStart(2, "0");
   const seconds = (elapsed % 60).toString().padStart(2, "0");
   timerElement.textContent = `${minutes}:${seconds}`;
@@ -525,6 +559,15 @@ async function startRecording() {
       console.log("Error acquiring wake lock.");
     }
 
+    const currentMode = modeSelect ? modeSelect.value : "live";
+    if (currentMode === "folder") {
+       isRecording = true;
+       isPaused = false;
+       statusText.textContent = "Folder Watch Mode active. Processing files in 'input/' directory...";
+       updateUI();
+       return;
+    }
+
     let stream;
     
     // chromium extension. in the future, both chrome page audio and mic will be used
@@ -557,14 +600,35 @@ async function startRecording() {
         stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
         statusText.textContent = "Using microphone audio.";
       }
-    } else if (isWebContext) {
+    if (isWebContext) {
       const audioConstraints = selectedMicrophoneId 
-        ? { audio: { deviceId: { exact: selectedMicrophoneId } } }
-        : { audio: true };
+        ? { audio: { deviceId: { exact: selectedMicrophoneId }, echoCancellation: true, noiseSuppression: true } }
+        : { audio: { echoCancellation: true, noiseSuppression: true } };
       stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+      
+      if (systemAudioToggle && systemAudioToggle.checked) {
+          try {
+              const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+              displayStream.getVideoTracks().forEach(track => track.stop());
+              
+              if (displayStream.getAudioTracks().length > 0) {
+                  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                  const micSource = audioContext.createMediaStreamSource(stream);
+                  const sysSource = audioContext.createMediaStreamSource(displayStream);
+                  const dest = audioContext.createMediaStreamDestination();
+                  
+                  micSource.connect(dest);
+                  sysSource.connect(dest);
+                  
+                  stream = dest.stream;
+              }
+          } catch(e) { console.log('System Audio cancelled or failed', e); }
+      }
     }
 
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 256;
     microphone = audioContext.createMediaStreamSource(stream);
@@ -587,7 +651,7 @@ async function startRecording() {
       });
 
       recorderWorker.onmessage = (e) => {
-        if (websocket && websocket.readyState === WebSocket.OPEN) {
+        if (websocket && websocket.readyState === WebSocket.OPEN && !isPaused) {
           websocket.send(e.data.buffer);
         }
       };
@@ -610,7 +674,7 @@ async function startRecording() {
         recorder = new MediaRecorder(stream);
       }
       recorder.ondataavailable = (e) => {
-        if (websocket && websocket.readyState === WebSocket.OPEN) {
+        if (websocket && websocket.readyState === WebSocket.OPEN && !isPaused) {
           if (e.data && e.data.size > 0) {
             websocket.send(e.data);
           }
@@ -619,6 +683,10 @@ async function startRecording() {
       recorder.start(chunkDuration);
     }
 
+    isPaused = false;
+    activeRecordingTime = 0;
+    lastTimerTick = Date.now();
+    
     startTime = Date.now();
     timerInterval = setInterval(updateTimer, 1000);
     drawWaveform();
@@ -751,13 +819,21 @@ async function toggleRecording() {
 function updateUI() {
   recordButton.classList.toggle("recording", isRecording);
   recordButton.disabled = waitingForStop;
+  pauseButton.disabled = waitingForStop;
+  pauseButton.style.display = isRecording ? "inline-flex" : "none";
+  if (!isRecording) {
+      pauseButton.classList.remove("active");
+      isPaused = false;
+  }
 
   if (waitingForStop) {
     if (statusText.textContent !== "Recording stopped. Processing final audio...") {
       statusText.textContent = "Please wait for processing to complete...";
     }
   } else if (isRecording) {
-    statusText.textContent = "";
+    if (!isPaused) {
+      statusText.textContent = "";
+    }
   } else {
     if (
       statusText.textContent !== "Finished processing audio! Ready to record again." &&
@@ -794,10 +870,83 @@ navigator.mediaDevices.addEventListener('devicechange', async () => {
 
 
 settingsToggle.addEventListener("click", () => {
-settingsDiv.classList.toggle("visible");
-settingsToggle.classList.toggle("active");
+    settingsModal.classList.add("visible");
 });
 
+closeModal.addEventListener("click", () => {
+    settingsModal.classList.remove("visible");
+});
+
+window.addEventListener("click", (event) => {
+    if (event.target === settingsModal) {
+        settingsModal.classList.remove("visible");
+    }
+});
+
+function togglePause() {
+  if (!isRecording) return;
+  isPaused = !isPaused;
+  
+  if (isPaused) {
+    pauseButton.classList.add("active");
+    statusText.textContent = "Recording paused...";
+  } else {
+    pauseButton.classList.remove("active");
+    statusText.textContent = "Recording resumed.";
+    lastTimerTick = Date.now();
+  }
+}
+
+if (pauseButton) {
+  pauseButton.addEventListener("click", togglePause);
+}
+
+document.addEventListener("keydown", (e) => {
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
+  
+  const recShortcut = shortcutRecordInput ? shortcutRecordInput.value : "";
+  const pauseShortcut = shortcutPauseInput ? shortcutPauseInput.value : "";
+  
+  const keyIdentifier = [
+      e.ctrlKey ? "Ctrl" : "",
+      e.altKey ? "Alt" : "",
+      e.shiftKey ? "Shift" : "",
+      e.key.length === 1 ? e.key.toUpperCase() : e.code
+  ].filter(Boolean).join("+");
+
+  if (recShortcut && keyIdentifier === recShortcut && !waitingForStop) {
+      e.preventDefault();
+      toggleRecording();
+  } else if (pauseShortcut && keyIdentifier === pauseShortcut && isRecording && !waitingForStop) {
+      e.preventDefault();
+      togglePause();
+  }
+});
+
+function handleShortcutInput(e) {
+  e.preventDefault();
+  const keyIdentifier = [
+      e.ctrlKey ? "Ctrl" : "",
+      e.altKey ? "Alt" : "",
+      e.shiftKey ? "Shift" : "",
+      e.key.length === 1 ? e.key.toUpperCase() : e.code
+  ].filter(Boolean).join("+");
+  if (["Ctrl", "Alt", "Shift"].includes(keyIdentifier)) return;
+  
+  e.target.value = keyIdentifier;
+}
+
+if (shortcutRecordInput) shortcutRecordInput.addEventListener("keydown", handleShortcutInput);
+if (shortcutPauseInput) shortcutPauseInput.addEventListener("keydown", handleShortcutInput);
+
+document.querySelectorAll(".clear-shortcut").forEach(btn => {
+  btn.addEventListener("click", (e) => {
+     const targetId = e.target.getAttribute("data-target");
+     if (targetId) {
+         document.getElementById(targetId).value = "";
+     }
+  });
+});
 if (isExtension) {
   async function checkAndRequestPermissions() {
     const micPermission = await navigator.permissions.query({

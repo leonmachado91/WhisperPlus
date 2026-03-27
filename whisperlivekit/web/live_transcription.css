@@ -191,8 +191,8 @@ body {
   padding: 20px;
 }
 
-/* Settings */
-.settings-container {
+/* Main Controls */
+.main-controls {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -207,60 +207,231 @@ body {
   gap: 15px;
 }
 
-.settings {
+#pauseButton {
+  width: 50px;
+  height: 50px;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--button-bg);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 1px solid var(--button-border);
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: center;
+  justify-content: center;
+}
+
+#pauseButton img {
+  width: 20px;
+  height: 20px;
+}
+
+#pauseButton:hover, .settings-toggle:hover {
+  background-color: var(--chip-bg);
+}
+
+#pauseButton:active, .settings-toggle:active {
+  transform: scale(0.95);
+}
+
+#pauseButton.paused {
+  background-color: var(--loading-bg);
+  border-color: #ff4d4d;
 }
 
 .settings-toggle {
-  width: 40px;
-  height: 40px;
+  width: 50px;
+  height: 50px;
   border: none;
   border-radius: 50%;
   background-color: var(--button-bg);
   border: 1px solid var(--button-border);
   cursor: pointer;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
 }
 
-.settings-toggle:hover {
-  background-color: var(--chip-bg);
-}
-
-.settings-toggle.active {
-  background-color: var(--chip-bg);
-}
-
 .settings-toggle img {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
 }
 
-@media (max-width: 10000px) {
-  .settings-toggle {
-    display: flex;
-  }
-  
-  .settings {
-    display: none;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    padding: 12px;
-  }
-  
-  .settings.visible {
-    display: flex;
-  }
+/* Modal Styles */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  align-items: center;
+  justify-content: center;
+}
+
+.modal.visible {
+  display: flex;
+}
+
+.modal-content {
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 85vh;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: var(--text);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.field.full-width {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.checkbox-field {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding-top: 25px;
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.checkbox-field label {
+  cursor: pointer;
+  font-size: 14px;
+  padding-top: 2px;
+}
+
+.shortcuts-fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 15px;
+  margin-top: 5px;
+}
+
+.shortcuts-fieldset legend {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 0 5px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  width: 100%;
+}
+.shortcut-row:last-child {
+  margin-bottom: 0;
+}
+
+.shortcut-row label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.shortcut-row input {
+  flex: 2;
+  text-align: center;
+  cursor: pointer;
+  background-color: var(--silence-bg) !important;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  font-size: 13px !important;
+  color: var(--text);
+}
+
+.clear-shortcut {
+  background: none;
+  border: none;
+  color: #ff4d4d;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+.clear-shortcut:hover {
+  opacity: 0.8;
+}
+
+#initialPromptInput {
+  width: 100%;
+  resize: vertical;
+  font-size: 14px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--button-bg);
+  color: var(--text);
+  box-sizing: border-box;
+  font-family: inherit;
+}
+#initialPromptInput:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
+}
+
+#modelSelect, #modeSelect, #outputFileInput {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 @media (max-width: 600px) {
-  .settings-container {
+  .main-controls {
     flex-direction: column;
     align-items: center;
     gap: 10px;
@@ -271,6 +442,10 @@ body {
     justify-content: center;
     align-items: center;
     gap: 15px;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -284,14 +459,17 @@ body {
 #chunkSelector,
 #websocketInput,
 #themeSelector,
-#microphoneSelect {
-  font-size: 16px;
-  padding: 5px 8px;
-  border-radius: 8px;
+#microphoneSelect,
+#modelSelect,
+#modeSelect,
+#outputFileInput {
+  font-size: 14px;
+  padding: 6px 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   background-color: var(--button-bg);
   color: var(--text);
-  max-height: 30px;
+  max-height: 32px;
 }
 
 #microphoneSelect {
@@ -303,7 +481,10 @@ body {
 #chunkSelector:focus,
 #websocketInput:focus,
 #themeSelector:focus,
-#microphoneSelect:focus {
+#microphoneSelect:focus,
+#modelSelect:focus,
+#modeSelect:focus,
+#outputFileInput:focus {
   outline: none;
   border-color: #007bff;
   box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);

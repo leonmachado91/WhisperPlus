@@ -9,7 +9,14 @@ call .venv\Scripts\activate
 
 set HF_HOME=e:\Dev\Whisper Live Kit\.hf_cache
 set HUGGINGFACE_HUB_CACHE=e:\Dev\Whisper Live Kit\.hf_cache
-set HF_TOKEN=YOUR_HUGGINGFACE_TOKEN_HERE
+
+:: Load variables from .env file if it exists
+if exist .env (
+    for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
+        if not "%%a"=="" set "%%a=%%~b"
+    )
+)
+
 set WLK_OUTPUT_FILE=transcription_live.txt
 
 echo   Iniciando servidor...

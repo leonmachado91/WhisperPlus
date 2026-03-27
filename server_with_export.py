@@ -136,6 +136,8 @@ class TranscriptionFileExporter:
             logger.error("Failed to write transcription file: %s", e)
 
 
+import copy
+
 # --------------------------------------------------------------------------- #
 # WebSocket handler (same as basic_server + file export hook)
 # --------------------------------------------------------------------------- #
@@ -197,13 +199,40 @@ async def websocket_endpoint(websocket: WebSocket):
     # Force Portuguese regardless of what the client sends
     session_language = "pt"
     mode = websocket.query_params.get("mode", "full")
+    
+    # Extract custom client settings
+    client_model = websocket.query_params.get("model", getattr(config, 'model_size', 'medium'))
+    client_diarization = websocket.query_params.get("diarization", "false").lower() == "true"
+    client_output_file = websocket.query_params.get("output_file", OUTPUT_FILE)
+    client_initial_prompt = websocket.query_params.get("initial_prompt", "")
+
+    current_model = getattr(transcription_engine.config, 'model_size', None)
+    current_diarization = getattr(transcription_engine.config, 'diarization', False)
+
+    if current_model != client_model or current_diarization != client_diarization:
+        logger.info(f"Reloading TranscriptionEngine: model={client_model}, diarization={client_diarization}")
+        TranscriptionEngine.reset()
+        new_config = copy.copy(config)
+        new_config.model_size = client_model
+        new_config.model_path = client_model # Often same as model_size for WhisperLiveKit
+        new_config.diarization = client_diarization
+        transcription_engine = TranscriptionEngine(config=new_config)
 
     audio_processor = AudioProcessor(
         transcription_engine=transcription_engine,
         language=session_language,
     )
+    
+    if client_initial_prompt and hasattr(audio_processor, 'transcription') and audio_processor.transcription:
+        orig_prompt_method = audio_processor.transcription.prompt
+        def custom_prompt():
+            prompt_text, context_text = orig_prompt_method()
+            new_prompt = f"{client_initial_prompt} {prompt_text}".strip()
+            return new_prompt, context_text
+        audio_processor.transcription.prompt = custom_prompt
+
     await websocket.accept()
-    logger.info("WebSocket connection opened. language=pt")
+    logger.info(f"WebSocket connection opened. language=pt, model={client_model}, diarization={client_diarization}")
 
     diff_tracker = None
     if mode == "diff":
@@ -211,13 +240,132 @@ async def websocket_endpoint(websocket: WebSocket):
         diff_tracker = DiffTracker()
 
     # Create a per-session file exporter
-    exporter = TranscriptionFileExporter(OUTPUT_FILE)
+    exporter = TranscriptionFileExporter(client_output_file)
 
     try:
         await websocket.send_json({"type": "config", "useAudioWorklet": bool(config.pcm_input), "mode": mode})
     except Exception as e:
         logger.warning(f"Failed to send config to client: {e}")
 
+    if mode == "folder":
+        # =====================================================================
+        # Folder Watch Mode
+        # =====================================================================
+        from pathlib import Path
+        input_dir = Path("input")
+        output_dir = Path("output")
+        input_dir.mkdir(exist_ok=True)
+        output_dir.mkdir(exist_ok=True)
+        
+        supported_extensions = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".mp4", ".mkv", ".webm"}
+        try:
+            await websocket.send_json({"type": "status", "message": "Watching 'input/' folder for new audio/video files..."})
+        except Exception:
+            return
+            
+        try:
+            while True:
+                files_to_process = sorted([f for f in input_dir.iterdir() if f.is_file() and f.suffix.lower() in supported_extensions])
+                
+                if not files_to_process:
+                    # Check if client disconnected while we are idle
+                    try:
+                        msg = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+                        if msg["type"] == "websocket.disconnect":
+                            break
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception:
+                        break
+                        
+                for file_path in files_to_process:
+                    logger.info(f"Processing offline file: {file_path.name}")
+                    try:
+                        await websocket.send_json({"type": "status", "message": f"Processing {file_path.name}..."})
+                    except Exception:
+                        raise WebSocketDisconnect()
+                        
+                    # Create new audio_processor for this file
+                    file_processor = AudioProcessor(
+                        transcription_engine=transcription_engine,
+                        language=session_language,
+                    )
+                    
+                    if client_initial_prompt and hasattr(file_processor, 'transcription') and file_processor.transcription:
+                        orig_prompt_method = file_processor.transcription.prompt
+                        def file_custom_prompt(orig=orig_prompt_method):
+                            prompt_text, context_text = orig()
+                            new_prompt = f"{client_initial_prompt} {prompt_text}".strip()
+                            return new_prompt, context_text
+                        file_processor.transcription.prompt = file_custom_prompt
+
+                    file_output_path = output_dir / f"{file_path.stem}.txt"
+                    file_exporter = TranscriptionFileExporter(str(file_output_path))
+                    
+                    file_results_generator = await file_processor.create_tasks()
+                    file_ws_task = asyncio.create_task(
+                        handle_websocket_results(websocket, file_results_generator, file_exporter, None)
+                    )
+                    
+                    # Convert audio and stream to processor
+                    command = [
+                        "ffmpeg", "-i", str(file_path),
+                        "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1"
+                    ]
+                    import subprocess
+                    process = await asyncio.create_subprocess_exec(
+                        *command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL
+                    )
+                    
+                    chunk_size = 32000 # ~1 second
+                    while True:
+                        chunk = await process.stdout.read(chunk_size)
+                        if not chunk:
+                            break
+                        await file_processor.process_audio(chunk)
+                        await asyncio.sleep(0.005) # Yield control
+                        
+                    await process.wait()
+                    
+                    # Cleanup processor for this file
+                    file_processor.is_stopping = True
+                    await asyncio.sleep(0.5)
+                    if not file_ws_task.done():
+                        file_ws_task.cancel()
+                        try:
+                            await file_ws_task
+                        except asyncio.CancelledError:
+                            pass
+                    await file_processor.cleanup()
+                    
+                    # Move to done
+                    done_dir = input_dir / "done"
+                    done_dir.mkdir(exist_ok=True)
+                    try:
+                        file_path.rename(done_dir / file_path.name)
+                    except Exception as e:
+                        logger.error(f"Failed to move {file_path.name} to done: {e}")
+                        
+                    try:
+                        await websocket.send_json({"type": "status", "message": f"Finished {file_path.name}"})
+                    except Exception:
+                        raise WebSocketDisconnect()
+                        
+        except WebSocketDisconnect:
+            logger.info("Folder Watch websocket disconnected by client.")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in folder watch mode: {e}", exc_info=True)
+        finally:
+            logger.info("Folder Watch mode exiting.")
+            return
+
+    # =====================================================================
+    # Live Mode (Microphone / Real-time)
+    # =====================================================================
     results_generator = await audio_processor.create_tasks()
     websocket_task = asyncio.create_task(
         handle_websocket_results(websocket, results_generator, exporter, diff_tracker)
@@ -255,7 +403,7 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.warning(f"Exception while awaiting cleanup: {e}")
 
         await audio_processor.cleanup()
-        logger.info("Session ended. Transcription saved to: %s", os.path.abspath(OUTPUT_FILE))
+        logger.info("Session ended. Transcription saved to: %s", os.path.abspath(client_output_file))
 
 
 # --------------------------------------------------------------------------- #
