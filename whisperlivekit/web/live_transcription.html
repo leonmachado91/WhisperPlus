@@ -110,9 +110,24 @@
                 </div>
 
                 <div class="field">
-                    <label for="outputFileInput">Output File Name / Path</label>
-                    <input id="outputFileInput" type="text" placeholder="e.g. C:/Live/session.txt or just session.txt" value="transcription_live.txt" />
-                    <small style="color:var(--muted); font-size: 0.8em; margin-top:4px; display:block"> Pode usar caminhos do Windows (C:\pastas\arquivo.txt) ou apenas o nome.</small>
+                    <label for="outputBaseInput">Nome base do arquivo</label>
+                    <input id="outputBaseInput" type="text" placeholder="transcription" value="transcription" />
+                    <small style="color:var(--muted); font-size: 0.8em; margin-top:4px; display:block">Cada sessão (Stop→Start) gera um arquivo novo: <em>nome_1.txt</em>, <em>nome_2.txt</em>… Pause/Resume mantém o mesmo.</small>
+                </div>
+
+                <div class="field">
+                    <label for="outputExtInput">Formato de exportação</label>
+                    <select id="outputExtInput">
+                        <option value="txt" selected>.txt</option>
+                        <option value="md">.md</option>
+                        <option value="log">.log</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label for="outputDirInput">Pasta de saída (opcional)</label>
+                    <input id="outputDirInput" type="text" placeholder="Padrão: live_output (junto ao servidor)" />
+                    <small style="color:var(--muted); font-size: 0.8em; margin-top:4px; display:block">Deixe vazio para usar <em>live_output/</em> na pasta do servidor. Aceita caminhos absolutos: <em>C:\Transcrições</em></small>
                 </div>
 
                 <div class="field full-width">

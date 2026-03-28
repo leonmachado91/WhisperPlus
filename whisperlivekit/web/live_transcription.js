@@ -78,7 +78,9 @@ const systemAudioToggle = document.getElementById("systemAudioToggle");
 const modelSelect = document.getElementById("modelSelect");
 const diarizationToggle = document.getElementById("diarizationToggle");
 const modeSelect = document.getElementById("modeSelect");
-const outputFileInput = document.getElementById("outputFileInput");
+const outputBaseInput = document.getElementById("outputBaseInput");
+const outputExtInput  = document.getElementById("outputExtInput");
+const outputDirInput  = document.getElementById("outputDirInput");
 const initialPromptInput = document.getElementById("initialPromptInput");
 const wordReplacementsInput = document.getElementById("wordReplacementsInput");
 const noSpeechThreshold = document.getElementById("noSpeechThreshold");
@@ -99,7 +101,9 @@ function saveSettings() {
     model: modelSelect ? modelSelect.value : null,
     diarization: diarizationToggle ? diarizationToggle.checked : false,
     systemAudio: systemAudioToggle ? systemAudioToggle.checked : false,
-    outputFile: outputFileInput ? outputFileInput.value : null,
+    outputBase: outputBaseInput ? outputBaseInput.value : "transcription",
+    outputExt:  outputExtInput  ? outputExtInput.value  : "txt",
+    outputDir:  outputDirInput  ? outputDirInput.value  : "",
     prompt: initialPromptInput ? initialPromptInput.value : null,
     wordReplacements: wordReplacementsInput ? wordReplacementsInput.value : null,
     noSpeechThreshold: noSpeechThreshold ? noSpeechThreshold.value : "0.6",
@@ -119,7 +123,9 @@ function restoreSettings() {
     if (s.model && modelSelect) modelSelect.value = s.model;
     if (s.diarization !== undefined && diarizationToggle) diarizationToggle.checked = s.diarization;
     if (s.systemAudio !== undefined && systemAudioToggle) systemAudioToggle.checked = s.systemAudio;
-    if (s.outputFile && outputFileInput) outputFileInput.value = s.outputFile;
+    if (s.outputBase && outputBaseInput) outputBaseInput.value = s.outputBase;
+    if (s.outputExt  && outputExtInput)  outputExtInput.value  = s.outputExt;
+    if (s.outputDir  !== undefined && outputDirInput) outputDirInput.value = s.outputDir || "";
     if (s.prompt && initialPromptInput) initialPromptInput.value = s.prompt;
     if (s.wordReplacements && wordReplacementsInput) wordReplacementsInput.value = s.wordReplacements;
     if (s.noSpeechThreshold !== undefined && noSpeechThreshold) { noSpeechThreshold.value = s.noSpeechThreshold; if (thresholdValueLabel) thresholdValueLabel.textContent = s.noSpeechThreshold; }
@@ -304,7 +310,11 @@ function setupWebSocket() {
       const params = new URLSearchParams();
       if (modelSelect && modelSelect.value) params.append("model", modelSelect.value);
       if (diarizationToggle && diarizationToggle.checked) params.append("diarization", "true");
-      if (outputFileInput && outputFileInput.value) params.append("output_file", outputFileInput.value);
+      // Output: base name, extension and optional custom directory
+      params.append("output_base", outputBaseInput?.value?.trim() || "transcription");
+      params.append("output_ext",  outputExtInput?.value?.trim()  || "txt");
+      const customDir = outputDirInput?.value?.trim();
+      if (customDir) params.append("output_dir", customDir);
       if (initialPromptInput && initialPromptInput.value) params.append("initial_prompt", initialPromptInput.value);
       if (wordReplacementsInput && wordReplacementsInput.value) params.append("word_replacements", wordReplacementsInput.value);
       if (noSpeechThreshold) params.append("no_speech_threshold", noSpeechThreshold.value);

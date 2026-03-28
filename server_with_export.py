@@ -41,8 +41,10 @@ config = parse_args()
 # Force language to Portuguese
 config.lan = "pt"
 
-# Extra arg: output file (env var or default)
-OUTPUT_FILE = os.environ.get("WLK_OUTPUT_FILE", "transcription_live.txt")
+# Defaults for live output
+DEFAULT_OUTPUT_BASE = "transcription"
+DEFAULT_OUTPUT_EXT  = "txt"
+DEFAULT_OUTPUT_DIR  = "live_output"
 
 transcription_engine = None
 
@@ -80,29 +82,71 @@ app.add_middleware(
 # Transcription File Exporter
 # --------------------------------------------------------------------------- #
 
+_resolve_lock = __import__('threading').Lock()
+
+
+def _resolve_output_path(base_name: str, extension: str = "txt", output_dir: str = DEFAULT_OUTPUT_DIR) -> str:
+    """Build a unique, numbered output path inside output_dir/YYYY-MM-DD/.
+
+    Never overwrites an existing file — always picks the next available number.
+    Thread-safe via _resolve_lock.
+    """
+    import glob as _glob
+
+    # Sanitize: strip slashes/dots that could escape the intended directory
+    safe_base = base_name.strip().replace("/", "_").replace("\\", "_") or DEFAULT_OUTPUT_BASE
+    safe_ext  = extension.strip().lstrip(".") or DEFAULT_OUTPUT_EXT
+
+    # Resolve the absolute path for the output directory
+    if os.path.isabs(output_dir):
+        abs_out_dir = output_dir
+    else:
+        abs_out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), output_dir)
+
+    today     = datetime.now().strftime("%Y-%m-%d")
+    day_dir   = os.path.join(abs_out_dir, today)
+
+    with _resolve_lock:
+        os.makedirs(day_dir, exist_ok=True)
+
+        pattern  = os.path.join(day_dir, f"{safe_base}_*.{safe_ext}")
+        existing = _glob.glob(pattern)
+
+        # Extract existing numbers to ensure no gaps cause collisions
+        used_nums = set()
+        for p in existing:
+            stem = os.path.splitext(os.path.basename(p))[0]  # e.g. "transcription_3"
+            parts = stem.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                used_nums.add(int(parts[1]))
+
+        next_num  = 1
+        while next_num in used_nums:
+            next_num += 1
+
+        filename = f"{safe_base}_{next_num}.{safe_ext}"
+        return os.path.join(day_dir, filename)
+
+
 class TranscriptionFileExporter:
-    """Writes the current transcription state to a .txt file in real time.
-    
-    Keeps two parts:
-    - Confirmed lines (from LocalAgreement)
-    - Buffer (partial text still being processed)
+    """Writes the current transcription state to a file in real time.
+
+    A new instance is created per WebSocket session, so each Start creates
+    a new numbered file inside live_output/YYYY-MM-DD/.
+    Pause/Resume keep the same instance → same file updated continuously.
     """
 
-    def __init__(self, filepath: str):
-        self.filepath = filepath
+    def __init__(self, base_name: str = DEFAULT_OUTPUT_BASE,
+                 extension: str = DEFAULT_OUTPUT_EXT,
+                 output_dir: str = DEFAULT_OUTPUT_DIR):
+        self.filepath      = _resolve_output_path(base_name, extension, output_dir)
         self.session_start = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        self.last_content = ""
+        self.last_content  = ""
 
-        # Create directory if it doesn't exist
-        abs_path = os.path.abspath(self.filepath)
-        dir_path = os.path.dirname(abs_path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-
-        # Create / clear the file at start
+        # Create / initialise the file at session start
         with open(self.filepath, "w", encoding="utf-8") as f:
             f.write(f"# Transcription started at {self.session_start}\n\n")
-        logger.info("Transcription file created: %s", os.path.abspath(self.filepath))
+        logger.info("Transcription file created: %s", self.filepath)
 
     def process_response(self, response) -> None:
         """Write the full current transcription state to the file.
@@ -206,7 +250,7 @@ async def health():
         "ready": True,
         "model_loaded": transcription_engine is not None,
         "current_model": getattr(transcription_engine.config, 'model_size', None) if transcription_engine else None,
-        "output_file": os.path.abspath(OUTPUT_FILE),
+        "output_dir": os.path.abspath(DEFAULT_OUTPUT_DIR),
         "language": "pt",
     }
 
@@ -280,7 +324,9 @@ async def websocket_endpoint(websocket: WebSocket):
     # Extract custom client settings
     client_model = websocket.query_params.get("model", getattr(config, 'model_size', 'medium'))
     client_diarization = websocket.query_params.get("diarization", "false").lower() == "true"
-    client_output_file = websocket.query_params.get("output_file", OUTPUT_FILE)
+    client_output_base = websocket.query_params.get("output_base", DEFAULT_OUTPUT_BASE)
+    client_output_ext  = websocket.query_params.get("output_ext",  DEFAULT_OUTPUT_EXT)
+    client_output_dir  = websocket.query_params.get("output_dir",  DEFAULT_OUTPUT_DIR)
     client_initial_prompt = websocket.query_params.get("initial_prompt", "")
     client_no_speech_threshold = float(websocket.query_params.get("no_speech_threshold", "0.6"))
 
@@ -435,8 +481,8 @@ async def websocket_endpoint(websocket: WebSocket):
         from whisperlivekit.diff_protocol import DiffTracker
         diff_tracker = DiffTracker()
 
-    # Create a per-session file exporter
-    exporter = TranscriptionFileExporter(client_output_file)
+    # Create a per-session file exporter (new file for every new WebSocket session)
+    exporter = TranscriptionFileExporter(client_output_base, client_output_ext, client_output_dir)
 
     try:
         await websocket.send_json({
@@ -608,7 +654,7 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.warning(f"Exception while awaiting cleanup: {e}")
 
         await audio_processor.cleanup()
-        logger.info("Session ended. Transcription saved to: %s", os.path.abspath(client_output_file))
+        logger.info("Session ended. Transcription saved to: %s", exporter.filepath)
 
 
 # --------------------------------------------------------------------------- #
@@ -618,12 +664,13 @@ async def websocket_endpoint(websocket: WebSocket):
 def main():
     import uvicorn
 
+    _out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), DEFAULT_OUTPUT_DIR)
     print("\n" + "=" * 60)
     print("  WhisperPlus — Transcription Server")
     print("=" * 60)
     print(f"  Language:     pt (fixed)")
     print(f"  Model:        (loaded on first use)")
-    print(f"  Output file:  {os.path.abspath(OUTPUT_FILE)}")
+    print(f"  Output dir:   {_out_dir}")
     print(f"  Server:       http://{config.host}:{config.port}")
     print("=" * 60 + "\n")
 
