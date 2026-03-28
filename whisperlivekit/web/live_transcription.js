@@ -1148,9 +1148,10 @@ if (settingsToggle) {
     checkHfStatus();
   });
 }
-[outputFileInput, initialPromptInput, websocketInput, noSpeechThreshold].forEach(el => {
+[outputBaseInput, outputDirInput, initialPromptInput, websocketInput, noSpeechThreshold].forEach(el => {
   if (el) el.addEventListener("input", saveSettings);
 });
+if (outputExtInput) outputExtInput.addEventListener("change", saveSettings);
 // Update threshold label in real time
 if (noSpeechThreshold && thresholdValueLabel) {
   noSpeechThreshold.addEventListener("input", () => {

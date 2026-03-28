@@ -142,6 +142,7 @@ transcription_live.txt
 live.txt
 input/
 output/
+live_output/
 docs/log.txt
 
 bin/
