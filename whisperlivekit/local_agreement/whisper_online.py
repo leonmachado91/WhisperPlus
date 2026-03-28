@@ -78,6 +78,7 @@ def backend_factory(
             confidence_validation,
             warmup_file=None,
             min_chunk_size=None,
+            no_speech_threshold=0.6,
         ):
     backend_choice = backend
     custom_reference = model_path or model_dir
@@ -134,6 +135,7 @@ def backend_factory(
             cache_dir=model_cache_dir,
             model_dir=model_override,
             lora_path=lora_path if backend_choice == "whisper" else None,
+            no_speech_threshold=no_speech_threshold,
         )
         e = time.time()
         logger.info(f"done. It took {round(e-t,2)} seconds.")

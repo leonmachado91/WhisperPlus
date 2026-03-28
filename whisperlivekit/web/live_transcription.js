@@ -35,12 +35,24 @@ let audioSource = null;
 // Loading overlay helpers
 const loadingOverlay = document.getElementById("loadingOverlay");
 const loadingMessage = document.getElementById("loadingMessage");
+const loadingLog = document.getElementById("loadingLog");
 function showLoading(msg) {
   if (loadingMessage) loadingMessage.textContent = msg || "Loading...";
+  if (loadingLog) { loadingLog.innerHTML = ""; loadingLog.style.display = "none"; }
   if (loadingOverlay) loadingOverlay.style.display = "flex";
 }
 function hideLoading() {
   if (loadingOverlay) loadingOverlay.style.display = "none";
+  if (loadingLog) loadingLog.style.display = "none";
+}
+function appendLog(msg) {
+  if (!loadingLog) return;
+  loadingLog.style.display = "block";
+  const line = document.createElement("div");
+  line.textContent = msg;
+  line.style.marginBottom = "2px";
+  loadingLog.appendChild(line);
+  loadingLog.scrollTop = loadingLog.scrollHeight;
 }
 
 waveCanvas.width = 60 * (window.devicePixelRatio || 1);
@@ -69,6 +81,8 @@ const modeSelect = document.getElementById("modeSelect");
 const outputFileInput = document.getElementById("outputFileInput");
 const initialPromptInput = document.getElementById("initialPromptInput");
 const wordReplacementsInput = document.getElementById("wordReplacementsInput");
+const noSpeechThreshold = document.getElementById("noSpeechThreshold");
+const thresholdValueLabel = document.getElementById("thresholdValue");
 
 const shortcutRecordInput = document.getElementById("shortcutRecord");
 const shortcutPauseInput = document.getElementById("shortcutPause");
@@ -88,6 +102,7 @@ function saveSettings() {
     outputFile: outputFileInput ? outputFileInput.value : null,
     prompt: initialPromptInput ? initialPromptInput.value : null,
     wordReplacements: wordReplacementsInput ? wordReplacementsInput.value : null,
+    noSpeechThreshold: noSpeechThreshold ? noSpeechThreshold.value : "0.6",
     opMode: modeSelect ? modeSelect.value : null,
     shortcutRecord: shortcutRecordInput ? shortcutRecordInput.value : null,
     shortcutPause: shortcutPauseInput ? shortcutPauseInput.value : null,
@@ -107,6 +122,7 @@ function restoreSettings() {
     if (s.outputFile && outputFileInput) outputFileInput.value = s.outputFile;
     if (s.prompt && initialPromptInput) initialPromptInput.value = s.prompt;
     if (s.wordReplacements && wordReplacementsInput) wordReplacementsInput.value = s.wordReplacements;
+    if (s.noSpeechThreshold !== undefined && noSpeechThreshold) { noSpeechThreshold.value = s.noSpeechThreshold; if (thresholdValueLabel) thresholdValueLabel.textContent = s.noSpeechThreshold; }
     if (s.opMode && modeSelect) modeSelect.value = s.opMode;
     if (s.shortcutRecord && shortcutRecordInput) shortcutRecordInput.value = s.shortcutRecord;
     if (s.shortcutPause && shortcutPauseInput) shortcutPauseInput.value = s.shortcutPause;
@@ -291,6 +307,7 @@ function setupWebSocket() {
       if (outputFileInput && outputFileInput.value) params.append("output_file", outputFileInput.value);
       if (initialPromptInput && initialPromptInput.value) params.append("initial_prompt", initialPromptInput.value);
       if (wordReplacementsInput && wordReplacementsInput.value) params.append("word_replacements", wordReplacementsInput.value);
+      if (noSpeechThreshold) params.append("no_speech_threshold", noSpeechThreshold.value);
       if (modeSelect && modeSelect.value) params.append("op_mode", modeSelect.value);
       
       const queryString = params.toString();
@@ -346,7 +363,35 @@ function setupWebSocket() {
 
     websocket.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      if (data.type === "model_loading") {
+        showLoading(`Carregando modelo ${data.model}... pode demorar alguns minutos na primeira vez.`);
+        return;
+      }
+
+      if (data.type === "model_log") {
+        appendLog(data.message);
+        return;
+      }
+
+      if (data.type === "error") {
+        if (data.code === "model_load_failed") {
+          if (loadingMessage) loadingMessage.textContent = data.message;
+          if (data.detail) appendLog(data.detail);
+          // Keep overlay visible so user can read the error
+          setTimeout(hideLoading, 15000);
+        } else {
+          hideLoading();
+        }
+        statusText.textContent = data.message || "Erro do servidor.";
+        if (data.code === "hf_token_missing" && diarizationToggle) {
+          diarizationToggle.checked = false;
+          saveSettings();
+        }
+        return;
+      }
+
       if (data.type === "config") {
+        hideLoading();
         serverUseAudioWorklet = !!data.useAudioWorklet;
         // Sync UI with what model the server actually loaded
         if (data.model && modelSelect) modelSelect.value = data.model;
@@ -1026,9 +1071,100 @@ document.querySelectorAll(".clear-shortcut").forEach(btn => {
 [diarizationToggle, systemAudioToggle].forEach(el => {
   if (el) el.addEventListener("change", saveSettings);
 });
-[outputFileInput, initialPromptInput, websocketInput].forEach(el => {
+
+// --------------------------------------------------------------------------- //
+// HuggingFace Token Management
+// --------------------------------------------------------------------------- //
+const hfTokenField = document.getElementById("hfTokenField");
+const hfTokenInput = document.getElementById("hfTokenInput");
+const hfTokenSave = document.getElementById("hfTokenSave");
+const hfTokenStatus = document.getElementById("hfTokenStatus");
+
+function updateHfFieldVisibility() {
+  if (hfTokenField && diarizationToggle) {
+    hfTokenField.style.display = diarizationToggle.checked ? "" : "none";
+  }
+}
+if (diarizationToggle) {
+  diarizationToggle.addEventListener("change", updateHfFieldVisibility);
+  updateHfFieldVisibility();
+}
+
+async function checkHfStatus() {
+  try {
+    const res = await fetch("/api/hf-status");
+    const data = await res.json();
+    if (hfTokenStatus) {
+      hfTokenStatus.textContent = data.has_token ? `✓ Token configurado (${data.token_preview})` : "Nenhum token configurado";
+      hfTokenStatus.style.color = data.has_token ? "green" : "var(--muted)";
+    }
+  } catch (e) {
+    console.warn("Could not check HF status", e);
+  }
+}
+
+if (hfTokenSave) {
+  hfTokenSave.addEventListener("click", async () => {
+    const token = hfTokenInput ? hfTokenInput.value.trim() : "";
+    if (!token) return;
+    try {
+      const res = await fetch("/api/hf-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (hfTokenStatus) {
+          hfTokenStatus.textContent = "✓ Token salvo!";
+          hfTokenStatus.style.color = "green";
+        }
+        if (hfTokenInput) hfTokenInput.value = "";
+      } else {
+        if (hfTokenStatus) {
+          hfTokenStatus.textContent = data.error || "Erro ao salvar token.";
+          hfTokenStatus.style.color = "red";
+        }
+      }
+    } catch (e) {
+      if (hfTokenStatus) hfTokenStatus.textContent = "Erro de conexão.";
+    }
+  });
+}
+
+// Check HF status when settings modal opens
+if (settingsToggle) {
+  settingsToggle.addEventListener("click", () => {
+    checkHfStatus();
+  });
+}
+[outputFileInput, initialPromptInput, websocketInput, noSpeechThreshold].forEach(el => {
   if (el) el.addEventListener("input", saveSettings);
 });
+// Update threshold label in real time
+if (noSpeechThreshold && thresholdValueLabel) {
+  noSpeechThreshold.addEventListener("input", () => {
+    thresholdValueLabel.textContent = noSpeechThreshold.value;
+  });
+}
+
+// --------------------------------------------------------------------------- //
+// Shutdown Server Button
+// --------------------------------------------------------------------------- //
+const shutdownBtn = document.getElementById("shutdownBtn");
+if (shutdownBtn) {
+  shutdownBtn.addEventListener("click", async () => {
+    if (!confirm("Deseja realmente parar o servidor WhisperPlus?")) return;
+    try {
+      await fetch("/api/shutdown", { method: "POST" });
+      statusText.textContent = "Servidor encerrado.";
+      shutdownBtn.textContent = "Servidor parado ✓";
+      shutdownBtn.disabled = true;
+    } catch (e) {
+      statusText.textContent = "Erro ao tentar parar o servidor.";
+    }
+  });
+}
 if (isExtension) {
   async function checkAndRequestPermissions() {
     const micPermission = await navigator.permissions.query({

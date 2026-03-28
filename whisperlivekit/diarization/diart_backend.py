@@ -193,7 +193,8 @@ class DiartDiarization:
             show_progress=False,
         )
         self.inference.attach_observers(self.observer)
-        asyncio.get_event_loop().run_in_executor(None, self.inference)
+        self._inference_thread = threading.Thread(target=self.inference, daemon=True)
+        self._inference_thread.start()
 
     def insert_silence(self, silence_duration):
         self.observer.global_time_offset += silence_duration

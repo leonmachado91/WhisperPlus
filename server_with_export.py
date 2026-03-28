@@ -13,15 +13,18 @@ A linguagem está fixada em pt (português).
 import asyncio
 import copy
 import logging
+import logging.handlers
 import os
+import queue
 import subprocess
 import sys
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from whisperlivekit import AudioProcessor, TranscriptionEngine, get_inline_ui_html, parse_args
 
@@ -44,14 +47,22 @@ OUTPUT_FILE = os.environ.get("WLK_OUTPUT_FILE", "transcription_live.txt")
 transcription_engine = None
 
 
+def _load_env_file():
+    """Load .env file into os.environ (simple key=value parser)."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, value = line.partition("=")
+                    os.environ.setdefault(key.strip(), value.strip())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global transcription_engine
-    transcription_engine = TranscriptionEngine(config=config)
-    logger.info("TranscriptionEngine initialized. Model: %s | Language: %s | Diarization: %s",
-                getattr(config, 'model_size', 'default'),
-                getattr(config, 'lan', 'pt'),
-                getattr(config, 'diarization', False))
+    _load_env_file()
+    logger.info("Server started. No model loaded yet — will download on first use.")
     yield
 
 
@@ -66,15 +77,15 @@ app.add_middleware(
 
 
 # --------------------------------------------------------------------------- #
-# File exporter — overwrites .txt with current full transcription state
+# Transcription File Exporter
 # --------------------------------------------------------------------------- #
 
 class TranscriptionFileExporter:
-    """Writes the current transcription state to a .txt file on every update.
-
-    Uses an overwrite strategy: the file always contains the complete,
-    up-to-date transcription. This avoids issues with partial/rewritten
-    lines from WhisperLiveKit's local agreement algorithm.
+    """Writes the current transcription state to a .txt file in real time.
+    
+    Keeps two parts:
+    - Confirmed lines (from LocalAgreement)
+    - Buffer (partial text still being processed)
     """
 
     def __init__(self, filepath: str):
@@ -152,7 +163,7 @@ async def handle_websocket_results(websocket, results_generator, exporter, diff_
     """Consumes results and sends them via WebSocket + writes to .txt file."""
     try:
         async for response in results_generator:
-            # 1) Send to browser (original behavior)
+            # 1) Send to browser
             try:
                 if diff_tracker is not None:
                     await websocket.send_json(diff_tracker.to_message(response))
@@ -192,10 +203,63 @@ async def health():
     global transcription_engine
     return {
         "status": "ok",
-        "ready": transcription_engine is not None,
+        "ready": True,
+        "model_loaded": transcription_engine is not None,
+        "current_model": getattr(transcription_engine.config, 'model_size', None) if transcription_engine else None,
         "output_file": os.path.abspath(OUTPUT_FILE),
         "language": "pt",
     }
+
+
+# --------------------------------------------------------------------------- #
+# HuggingFace Token Management (for Diarization with Diart/Pyannote)
+# --------------------------------------------------------------------------- #
+
+@app.get("/api/hf-status")
+async def hf_status():
+    token = os.environ.get("HF_TOKEN", "")
+    return {
+        "has_token": bool(token),
+        "token_preview": (token[:8] + "...") if len(token) > 8 else "",
+    }
+
+
+@app.post("/api/hf-token")
+async def set_hf_token(request: Request):
+    body = await request.json()
+    token = body.get("token", "").strip()
+    if not token:
+        return JSONResponse({"success": False, "error": "Token vazio"}, status_code=400)
+
+    os.environ["HF_TOKEN"] = token
+    os.environ["HUGGING_FACE_HUB_TOKEN"] = token
+
+    # Persist to .env file
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    env_lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            env_lines = [l for l in f.readlines() if not l.strip().startswith("HF_TOKEN=")]
+    env_lines.append(f"HF_TOKEN={token}\n")
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(env_lines)
+
+    return {"success": True}
+
+
+@app.post("/api/shutdown")
+async def shutdown_server():
+    """Gracefully shut down the server."""
+    logger.info("Shutdown requested via API.")
+
+    def _force_exit():
+        import time
+        time.sleep(0.5)  # Let the HTTP response be sent
+        os._exit(0)
+
+    import threading
+    threading.Thread(target=_force_exit, daemon=True).start()
+    return {"success": True, "message": "Servidor sendo desligado..."}
 
 
 @app.websocket("/asr")
@@ -204,6 +268,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # Force Portuguese regardless of what the client sends
     session_language = "pt"
+
+    # Accept WebSocket FIRST so we can send status messages to the client
+    await websocket.accept()
 
     # Diff protocol mode (full/diff) — separate from operation mode
     mode = websocket.query_params.get("mode", "full")
@@ -215,6 +282,7 @@ async def websocket_endpoint(websocket: WebSocket):
     client_diarization = websocket.query_params.get("diarization", "false").lower() == "true"
     client_output_file = websocket.query_params.get("output_file", OUTPUT_FILE)
     client_initial_prompt = websocket.query_params.get("initial_prompt", "")
+    client_no_speech_threshold = float(websocket.query_params.get("no_speech_threshold", "0.6"))
 
     # Parse word_replacements: format "wrong1:correct1,wrong2:correct2"
     raw_replacements = websocket.query_params.get("word_replacements", "")
@@ -229,24 +297,128 @@ async def websocket_endpoint(websocket: WebSocket):
                 if wrong and correct:
                     client_word_replacements[wrong] = correct
 
-    current_model = getattr(transcription_engine.config, 'model_size', None)
-    current_diarization = getattr(transcription_engine.config, 'diarization', False)
+    # Check if diarization requires HuggingFace token
+    if client_diarization and not os.environ.get("HF_TOKEN"):
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "code": "hf_token_missing",
+                "message": "Token HuggingFace necessário para diarização. Configure nas Settings.",
+            })
+        except Exception:
+            pass
+        client_diarization = False  # Continue without diarization
 
-    if current_model != client_model or current_diarization != client_diarization:
-        logger.info(f"Reloading TranscriptionEngine: model={client_model}, diarization={client_diarization}")
-        TranscriptionEngine.reset()
+    # Determine if we need to create or reload the TranscriptionEngine
+    needs_reload = False
+    if transcription_engine is None:
+        needs_reload = True
+        logger.info("No engine loaded yet — will create on this connection.")
+    else:
+        current_model = getattr(transcription_engine.config, 'model_size', None)
+        current_diarization = getattr(transcription_engine.config, 'diarization', False)
+        if current_model != client_model or current_diarization != client_diarization:
+            needs_reload = True
+            logger.info(f"Engine config changed ({current_model}->{client_model}, diar:{current_diarization}->{client_diarization}) — reloading.")
+        else:
+            logger.info(f"Engine already loaded (model={current_model}, diar={current_diarization}) — reusing.")
+
+    if needs_reload:
+        # Notify frontend that model is loading (may need to download)
+        try:
+            await websocket.send_json({"type": "model_loading", "model": client_model})
+        except Exception:
+            pass
+
+        logger.info(f"Loading TranscriptionEngine: model={client_model}, diarization={client_diarization}")
+        if transcription_engine is not None:
+            TranscriptionEngine.reset()
         new_config = copy.copy(config)
         new_config.model_size = client_model
-        new_config.model_path = None  # Let backend resolve to "Systran/faster-whisper-{size}"
+        new_config.model_path = None
         new_config.diarization = client_diarization
+        new_config.diarization_backend = "diart"
+        new_config.no_speech_threshold = client_no_speech_threshold
         new_config.init_prompt = client_initial_prompt or None
-        transcription_engine = TranscriptionEngine(config=new_config)
+
+        # Run engine creation in a thread so the event loop stays alive
+        # and we can stream log messages to the frontend in real time.
+        log_queue = queue.Queue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        queue_handler.setLevel(logging.INFO)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(queue_handler)
+
+        load_error = None
+
+        def _create_engine():
+            global transcription_engine
+            nonlocal load_error
+            try:
+                transcription_engine = TranscriptionEngine(config=new_config)
+            except Exception as e:
+                load_error = e
+
+        import threading
+        loader_thread = threading.Thread(target=_create_engine, daemon=True)
+        loader_thread.start()
+
+        # Stream log messages to frontend while engine loads
+        while loader_thread.is_alive():
+            loader_thread.join(timeout=0.3)
+            while not log_queue.empty():
+                try:
+                    record = log_queue.get_nowait()
+                    msg = record.getMessage()
+                    await websocket.send_json({"type": "model_log", "message": msg})
+                except Exception:
+                    pass
+
+        # Drain remaining log messages
+        while not log_queue.empty():
+            try:
+                record = log_queue.get_nowait()
+                msg = record.getMessage()
+                await websocket.send_json({"type": "model_log", "message": msg})
+            except Exception:
+                pass
+
+        root_logger.removeHandler(queue_handler)
+
+        if load_error:
+            error_detail = traceback.format_exception(type(load_error), load_error, load_error.__traceback__)
+            error_msg = "".join(error_detail[-3:])  # Last 3 lines of traceback
+            logger.error(f"Failed to load model: {error_msg}")
+            try:
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "model_load_failed",
+                    "message": f"Erro ao carregar modelo '{client_model}': {str(load_error)}",
+                    "detail": error_msg,
+                })
+            except Exception:
+                pass
+            await websocket.close()
+            return
+
     elif client_initial_prompt:
         # Same model, but update init_prompt for the current session
-        # Must update BOTH config and args (Namespace snapshot) since
-        # AudioProcessor reads from args, not config directly.
         transcription_engine.config.init_prompt = client_initial_prompt
         transcription_engine.args.init_prompt = client_initial_prompt
+
+    # Safety check: if engine still None after loading attempt, abort
+    if transcription_engine is None:
+        logger.error("TranscriptionEngine is None after loading — aborting session.")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "code": "engine_unavailable",
+                "message": "Falha ao inicializar o engine de transcrição.",
+            })
+        except Exception:
+            pass
+        await websocket.close()
+        return
 
     # Always set word_replacements on args so AudioProcessor picks them up
     transcription_engine.args.word_replacements = client_word_replacements
@@ -256,8 +428,7 @@ async def websocket_endpoint(websocket: WebSocket):
         language=session_language,
     )
 
-    await websocket.accept()
-    logger.info(f"WebSocket connection opened. language=pt, model={client_model}, diarization={client_diarization}, prompt={client_initial_prompt[:50] if client_initial_prompt else 'none'}")
+    logger.info(f"WebSocket session started. model={client_model}, diarization={client_diarization}")
 
     diff_tracker = None
     if mode == "diff":
@@ -448,11 +619,10 @@ def main():
     import uvicorn
 
     print("\n" + "=" * 60)
-    print("  WhisperLiveKit — Server with Real-time .txt Export")
+    print("  WhisperPlus — Transcription Server")
     print("=" * 60)
-    print(f"  Model:        {getattr(config, 'model_size', 'default')}")
     print(f"  Language:     pt (fixed)")
-    print(f"  Diarization:  {getattr(config, 'diarization', False)}")
+    print(f"  Model:        (loaded on first use)")
     print(f"  Output file:  {os.path.abspath(OUTPUT_FILE)}")
     print(f"  Server:       http://{config.host}:{config.port}")
     print("=" * 60 + "\n")

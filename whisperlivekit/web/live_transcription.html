@@ -14,6 +14,7 @@
         <div class="loading-content">
             <div class="loading-spinner"></div>
             <p id="loadingMessage">Connecting...</p>
+            <div id="loadingLog" style="max-height:180px; overflow-y:auto; width:100%; max-width:500px; margin-top:12px; padding:8px 12px; background:rgba(0,0,0,0.15); border-radius:8px; font-family:monospace; font-size:0.75em; color:var(--muted); text-align:left; display:none;"></div>
         </div>
     </div>
 
@@ -90,6 +91,16 @@
                     <label for="diarizationToggle">Enable Diarization (Speaker ID)</label>
                 </div>
 
+                <div class="field full-width" id="hfTokenField" style="display:none;">
+                    <label for="hfTokenInput">HuggingFace Token (required for Diarization)</label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input id="hfTokenInput" type="password" placeholder="hf_..." style="flex:1" />
+                        <button id="hfTokenSave" type="button" style="padding:6px 16px; border-radius:6px; border:1px solid var(--muted); cursor:pointer;">Save</button>
+                        <span id="hfTokenStatus" style="font-size:0.85em; color:var(--muted);"></span>
+                    </div>
+                    <small style="color:var(--muted); font-size: 0.8em; margin-top:4px; display:block">Necessário para modelos Pyannote. Aceite os termos em huggingface.co e gere seu token lá.</small>
+                </div>
+
                 <div class="field">
                     <label for="modeSelect">Operation Mode</label>
                     <select id="modeSelect">
@@ -113,6 +124,12 @@
                     <label for="wordReplacementsInput">Word Replacements (Force Spelling)</label>
                     <textarea id="wordReplacementsInput" placeholder="wrong:correct, e.g. Julio:Giulio, jeff:Jeff" rows="2"></textarea>
                     <small style="color:var(--muted); font-size: 0.8em; margin-top:4px; display:block">Força a grafia correta de nomes. Formato: errado:correto separados por vírgula.</small>
+                </div>
+
+                <div class="field full-width">
+                    <label for="noSpeechThreshold">No-Speech Threshold: <span id="thresholdValue">0.6</span></label>
+                    <input id="noSpeechThreshold" type="range" min="0" max="1" step="0.05" value="0.6" style="width:100%" />
+                    <small style="color:var(--muted); font-size: 0.8em; margin-top:4px; display:block">Quanto maior, mais tolerante com silêncio (mais alucinações). Menor = mais agressivo ao cortar silêncio.</small>
                 </div>
 
                 <fieldset class="field full-width shortcuts-fieldset">
@@ -149,6 +166,10 @@
                             <span>Dark</span>
                         </label>
                     </div>
+                </div>
+
+                <div class="field full-width" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--muted);">
+                    <button id="shutdownBtn" type="button" style="width:100%; padding:10px; border-radius:8px; border:1px solid #d32f2f; background:transparent; color:#d32f2f; cursor:pointer; font-weight:600;">⏻ Parar Servidor</button>
                 </div>
             </div>
         </div>

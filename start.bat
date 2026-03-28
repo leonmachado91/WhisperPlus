@@ -1,7 +1,7 @@
 @echo off
 echo.
 echo ============================================================
-echo   WhisperLiveKit - Transcricao em Tempo Real (PT)
+echo   WhisperPlus - Servidor de Transcricao
 echo ============================================================
 echo.
 
@@ -9,6 +9,9 @@ call .venv\Scripts\activate
 
 set HF_HOME=%~dp0.hf_cache
 set HUGGINGFACE_HUB_CACHE=%~dp0.hf_cache
+
+:: Add local bin to PATH (ffmpeg, uv, etc.)
+set "PATH=%~dp0bin;%PATH%"
 
 :: Load variables from .env file if it exists
 if exist .env (
@@ -19,13 +22,13 @@ if exist .env (
 
 set WLK_OUTPUT_FILE=transcription_live.txt
 
-echo   Iniciando servidor...
-echo   Abra http://localhost:8000 no navegador
-echo   Transcricao salva em: transcription_live.txt
-echo   Idioma: Portugues (fixo)
-echo   Pressione Ctrl+C para parar
+echo   Servidor:    http://localhost:8000
+echo   Modelo:      (carregado sob demanda pelo painel)
+echo   Idioma:      Portugues (fixo)
+echo   Output:      transcription_live.txt
+echo   Ctrl+C para parar
 echo.
 
-python server_with_export.py --model large-v3-turbo --diarization --diarization-backend diart
+python server_with_export.py
 
 pause

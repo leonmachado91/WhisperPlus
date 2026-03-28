@@ -99,6 +99,7 @@ class TranscriptionEngine:
             "lora_path": config.lora_path,
             "lan": config.lan,
             "direct_english_translation": config.direct_english_translation,
+            "no_speech_threshold": getattr(config, 'no_speech_threshold', 0.6),
         }
 
         if config.transcription:

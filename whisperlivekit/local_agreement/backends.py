@@ -16,7 +16,7 @@ class ASRBase:
     sep = " "  # join transcribe words with this character (" " for whisper_timestamped,
               # "" for faster-whisper because it emits the spaces when needed)
 
-    def __init__(self, lan, model_size=None, cache_dir=None, model_dir=None, lora_path=None, logfile=sys.stderr):
+    def __init__(self, lan, model_size=None, cache_dir=None, model_dir=None, lora_path=None, logfile=sys.stderr, **kwargs):
         self.logfile = logfile
         self.transcribe_kargs = {}
         self.lora_path = lora_path
@@ -102,6 +102,10 @@ class FasterWhisperASR(ASRBase):
     """Uses faster-whisper as the backend."""
     sep = ""
 
+    def __init__(self, lan, model_size=None, cache_dir=None, model_dir=None, lora_path=None, logfile=sys.stderr, no_speech_threshold=0.6, **kwargs):
+        self.no_speech_threshold = no_speech_threshold
+        super().__init__(lan, model_size, cache_dir, model_dir, lora_path, logfile)
+
     def load_model(self, model_size=None, cache_dir=None, model_dir=None):
         from faster_whisper import WhisperModel
 
@@ -127,13 +131,20 @@ class FasterWhisperASR(ASRBase):
         return model
 
     def transcribe(self, audio: np.ndarray, init_prompt: str = "") -> list:
+        # When init_prompt is set, condition_on_previous_text must be True
+        # so the Whisper decoder is actually biased by the prompt tokens.
+        # Without a prompt, keep it False to prevent hallucination loops.
+        use_context = bool(init_prompt)
         segments, info = self.model.transcribe(
             audio,
             language=self.original_language,
             initial_prompt=init_prompt,
             beam_size=5,
             word_timestamps=True,
-            condition_on_previous_text=True,
+            condition_on_previous_text=use_context,
+            no_speech_threshold=self.no_speech_threshold,
+            log_prob_threshold=-1.0,
+            vad_filter=True,
             **self.transcribe_kargs,
         )
         return list(segments)
@@ -141,7 +152,7 @@ class FasterWhisperASR(ASRBase):
     def ts_words(self, segments) -> List[ASRToken]:
         tokens = []
         for segment in segments:
-            if segment.no_speech_prob > 0.9:
+            if segment.no_speech_prob > self.no_speech_threshold:
                 continue
             for word in segment.words:
                 token = ASRToken(word.start, word.end, word.word, probability=word.probability)
